@@ -1,0 +1,42 @@
+/*
+ * Design tokens "Meja Baca Saat Senja" — SPEC.md Bagian 3.
+ * Tailwind v4 CSS-first config: tiap variable --color-x, --font-x, --radius-x
+ * di sini otomatis jadi utility class Tailwind (mis. --color-desk -> bg-desk).
+ */
+@theme {
+  /* Meja gelap (feed) */
+  --color-desk: #1b1e24;
+  --color-desk-2: #23272f;
+  --color-desk-3: #2c3039;
+  --color-desk-line: #33383f;
+  --color-on-d: #e5e0d4;
+  --color-on-d2: #95999f;
+  --color-on-d3: #6a6e75;
+
+  /* Halaman terang (reading view) */
+  --color-page: #ebe5d6;
+  --color-page-2: #f3eee1;
+  --color-page-ink: #24201a;
+  --color-page-ink2: #6b6356;
+  --color-page-line: #d8cfbc;
+
+  /* Aksen tunggal — jangan tambah warna aksen lain */
+  --color-amber: #d9a04e;
+  --color-amber-lo: rgba(217, 160, 78, 0.12);
+
+  /* Warna topik — hanya untuk titik kecil, bukan badge rame */
+  --color-topic-kesehatan: #5fb89a;
+  --color-topic-ai: #9a90ec;
+  --color-topic-neurosains: #e08a6a;
+  --color-topic-lingkungan: #6ba8e0;
+  --color-topic-psikologi: #e08ab0;
+  --color-topic-ekonomi: #c4884d;
+
+  /* Tipografi — lihat src/lib/fonts.ts untuk pemuatannya */
+  --font-grotesk: var(--font-space-grotesk), system-ui, sans-serif;
+  --font-serif-read: var(--font-spectral), Georgia, serif;
+  --font-ui: var(--font-inter), system-ui, sans-serif;
+
+  /* Signature radius — tajam (14px), bukan bubbly */
+  --radius-card: 14px;
+}

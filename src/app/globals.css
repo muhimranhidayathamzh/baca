@@ -1,0 +1,46 @@
+@import "tailwindcss";
+@import "../styles/tokens.css";
+
+body {
+  background-color: var(--color-desk);
+  color: var(--color-on-d);
+  font-family: var(--font-ui);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Noise grain overlay — texture fisik, bukan plastik digital.            */
+/* Anti-AI-slop checklist, SPEC.md Bagian 3.                              */
+/* ---------------------------------------------------------------------- */
+.noise-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  opacity: 0.035;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ---------------------------------------------------------------------- */
+/* Underline amber organik — 3 varian SVG path, di-assign random per hook */
+/* biar nggak seragam robotik (anti-AI-slop). Dipakai di frasa "key".     */
+/* ---------------------------------------------------------------------- */
+.underline-amber-1,
+.underline-amber-2,
+.underline-amber-3 {
+  background-repeat: no-repeat;
+  background-position: 0 100%;
+  background-size: 100% 0.5em;
+  padding-bottom: 0.05em;
+}
+
+.underline-amber-1 {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 12' preserveAspectRatio='none'%3E%3Cpath d='M1 8.5C15 5 28 10.5 42 7.5C58 4 70 9.5 99 6' fill='none' stroke='%23D9A04E' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+
+.underline-amber-2 {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 12' preserveAspectRatio='none'%3E%3Cpath d='M1 6C20 10 35 3 50 6.5C68 10.5 82 4 99 8' fill='none' stroke='%23D9A04E' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+
+.underline-amber-3 {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 12' preserveAspectRatio='none'%3E%3Cpath d='M1 9C12 4 30 4.5 45 8.5C62 12.5 80 3.5 99 7.5' fill='none' stroke='%23D9A04E' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E");
+}
