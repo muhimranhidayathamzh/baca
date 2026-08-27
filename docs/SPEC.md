@@ -134,8 +134,19 @@ baca_onboarded       : boolean   — sudah onboarding atau belum
 baca_topics          : string[]  — topik pilihan user
 baca_mode            : string    — "fokus" | "explore"
 baca_saved           : object[]  — array paper yang di-bookmark
-baca_read_history    : string[]  — array paper_id yang sudah dibaca
+baca_read_history    : string[]  — array paper_id yang sudah dibaca (maks 200)
+baca_active_topic    : string    — chip topik yang sedang aktif di feed
 ```
+
+> `baca_active_topic` ditambahkan saat Fase 3 (tidak ada di draft awal) supaya
+> pilihan chip user bertahan saat pindah halaman dan kembali lagi, bukan selalu
+> reset ke topik pertama.
+>
+> Implementasinya (`hooks/useLocalStorage.ts`) memakai `useSyncExternalStore`,
+> bukan `useState` + `useEffect`. Selain benar untuk SSR, ini membuat semua
+> komponen yang membaca kunci sama selalu sinkron — dengan pendekatan
+> `useState`, dua komponen yang memakai kunci yang sama akan menyimpan salinan
+> state masing-masing dan bisa saling berbeda.
 
 ---
 
@@ -256,6 +267,13 @@ Ekonomi:    #C4884D
   - Kartu di luar viewport tidak diproses = hemat biaya + kerasa lebih cepat
 - **Infinite scroll / load more:** load 20 paper per batch, cursor pagination
 - **De-dup:** paper yang sudah ada di read_history tidak dimunculkan lagi di feed
+
+> **Terverifikasi di browser (Fase 3, 27 Agustus 2026):** 40 kartu dimuat lewat
+> infinite scroll, hanya 23 yang diringkas (kartu di luar viewport tidak
+> diproses), puncak request paralel tepat **3**, dan **CLS 0.058** (syarat
+> < 0.1). Pergantian topik/mode membatalkan request yang masih berjalan
+> (`AbortController`) — tanpa itu, dua pergantian beruntun membuat request
+> kedua terbuang dan feed macet di status loading.
 
 ### 4.3 Reading View (imersif)
 - Slide up dari bawah (halaman terang naik ke meja gelap)

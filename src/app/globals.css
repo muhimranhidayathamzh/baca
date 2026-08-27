@@ -7,6 +7,15 @@ body {
   font-family: var(--font-ui);
 }
 
+/* Scroll tanpa scrollbar terlihat — dipakai chip bar & isi reader. */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
 /* ---------------------------------------------------------------------- */
 /* Noise grain overlay — texture fisik, bukan plastik digital.            */
 /* Anti-AI-slop checklist, SPEC.md Bagian 3.                              */
@@ -15,6 +24,9 @@ body {
   position: fixed;
   inset: 0;
   z-index: 60;
+  /* Murni dekorasi: tanpa ini, lapisan yang menutupi seluruh layar akan
+     menelan semua klik sehingga kartu dan navigasi tidak bisa disentuh. */
+  pointer-events: none;
   opacity: 0.035;
   mix-blend-mode: overlay;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
