@@ -66,12 +66,18 @@
 
 **`GET /api/feed`**
 - Query params: `topic` (string), `mode` ("fokus" | "explore"), `cursor` (string, opsional), `exclude` (string, opsional — comma-separated paper_id dari read_history client)
-- Fokus: filter 2022-2026, is_oa:true, sort cited_by_count:desc, re-rank balanced
-- Explore: filter sama, tapi pakai `sample=` + random seed
-- Paper yang ada di `exclude` dibuang dari hasil (mencegah feed ngulang paper yang sama)
-- Pakai cursor pagination OpenAlex untuk halaman berikutnya
+- Fokus: filter 2022+, is_oa:true, type:article, has_abstract:true, sort cited_by_count:desc, re-rank balanced
+- Explore: filter sama, tapi pakai `sample=` + random seed (parameter `seed` dikirim balik ke client)
+- Paper yang ada di `exclude` dibuang dari hasil (mencegah feed ngulang paper yang sama).
+  Dibatasi 100 id terakhir supaya URL tidak meledak seiring read_history tumbuh
+- Paginasi: **cursor OpenAlex untuk mode Fokus, nomor halaman untuk mode Explore**
+  (`sample` tidak kompatibel dengan cursor — lihat Bagian 6 "Hasil verifikasi filter")
+- Diambil 25 kandidat per request lalu dikembalikan maks 20, supaya masih tersisa
+  cukup paper setelah `exclude` membuang sebagian
 - Rate limit: max 60 request/menit per IP
 - Return: array of paper objects (max 20 per page) + next_cursor
+- Abstrak **tidak pernah** ikut dikirim ke client — hanya dipakai server-side di
+  `/api/summarize`
 
 **`POST /api/summarize`**
 - Body: `{ paper_id }` SAJA — client TIDAK BOLEH kirim abstrak (mencegah endpoint dibajak jadi proxy Claude)
@@ -90,7 +96,15 @@
 **`GET /api/search`**
 - Query params: `q` (string), `page` (number, opsional)
 - Proxy ke OpenAlex search
-- Return: array of paper objects
+- Rate limit: max 60 request/menit per IP
+- Return: array of paper objects + `nextPage`
+
+### Rate limiting (`lib/ratelimit.ts`)
+Produksi memakai Upstash Redis supaya hitungan konsisten lintas instance
+serverless Vercel. Saat dev tanpa kredensial Upstash dipakai limiter in-memory
+supaya `npm run dev` tetap bisa jalan. Di produksi, env Upstash yang kosong
+atau Upstash yang tidak bisa dihubungi membuat request **ditolak** (fail
+closed) — bukan diloloskan tanpa proteksi.
 
 ### Database Schema (Supabase)
 
@@ -331,9 +345,18 @@ ABSTRAK: {abstract (maks 1500 karakter)}
 Jawab HANYA dalam format JSON valid. Tanpa markdown, tanpa backtick, tanpa penjelasan.
 ```
 
-Model: `gemini-2.5-flash-preview-05-20` (atau model Flash terbaru yang tersedia di free tier)
+Model: dikonfigurasi lewat env var **`GEMINI_MODEL`**, default `gemini-2.5-flash`.
+Draft awal spec menyebut `gemini-2.5-flash-preview-05-20`, tapi model preview
+terikat tanggal cepat dipensiunkan — nama model dijadikan konfigurasi supaya
+bisa diganti tanpa menyentuh kode.
 SDK: `@google/genai`
 Max tokens: 1000
+Output dipaksa JSON di level API (`responseMimeType: "application/json"`), jauh
+lebih andal daripada hanya memintanya lewat prompt.
+
+> **Validasi hasil model:** `key` wajib substring persis dari `hook`. Kalau
+> tidak cocok, `key` di-set `null` — hook tanpa underline jauh lebih baik
+> daripada underline amber yang menempel di posisi salah.
 
 > **Arsitektur provider-agnostic:** `lib/summarize.ts` mengekspos satu fungsi
 > `summarizePaper(title, abstract) → { hook, key, quick[], deep }`.
@@ -351,22 +374,66 @@ Max tokens: 1000
 
 ## 6. OPENALEX INTEGRATION
 
+> **Terverifikasi live pada 27 Agustus 2026** (Fase 2 langkah 9). Bagian ini
+> sudah disesuaikan dengan respons OpenAlex yang sebenarnya; lihat
+> "Hasil verifikasi" di bawah untuk apa yang berubah dan kenapa.
+
 ### API Key
 - Daftar gratis di openalex.org/settings/api
 - Simpan di environment variable: `OPENALEX_API_KEY`
 - Budget: $1/hari (10.000 panggilan) — lebih dari cukup
+- **Tanpa key**, app tetap jalan lewat *polite pool* (parameter `mailto`), tapi
+  kuotanya hanya ~1.000 kredit/hari per IP (header `X-RateLimit-Limit: 1000`,
+  `X-RateLimit-Limit-USD: 0.1`) — cukup untuk dev, tidak untuk produksi.
+- **Key yang salah ditolak keras**: OpenAlex membalas `401 API key not found`.
+  Karena itu `lib/openalex.ts` hanya mengirim `api_key` kalau env var-nya
+  benar-benar terisi — env kosong lebih baik daripada env ngawur.
 
 ### Field Mapping (Indonesia → OpenAlex)
+Field ID diverifikasi terhadap endpoint `/fields` yang live (26 field total):
+
 ```json
 {
-  "Kesehatan": "Medicine",
-  "AI": "Computer Science",
-  "Neurosains": "Neuroscience",
-  "Lingkungan": "Environmental Science",
-  "Psikologi": "Psychology",
-  "Ekonomi": "Economics, Econometrics and Finance"
+  "Kesehatan":  "fields/27",  // Medicine
+  "AI":         "fields/17",  // Computer Science
+  "Neurosains": "fields/28",  // Neuroscience
+  "Lingkungan": "fields/23",  // Environmental Science
+  "Psikologi":  "fields/32",  // Psychology
+  "Ekonomi":    "fields/20"   // Economics, Econometrics and Finance
 }
 ```
+
+### Hasil verifikasi filter (langkah 9)
+
+**Path filter `topics.field.id` TIDAK berubah post-Walden** — tetap valid dan
+membalas HTTP 200. Tapi verifikasi memunculkan tiga hal yang mengubah
+implementasi:
+
+1. **Dipakai `primary_topic.field.id`, bukan `topics.field.id`.** `topics`
+   mencakup topik sekunder, sehingga paper salah-klasifikasi bocor ke feed
+   topik: top-6 Medicine memunculkan paper IoT lalu lintas kota dan situs
+   arkeologi Zaman Batu. Dengan `primary_topic` hasilnya koheren (semua
+   onkologi/statistik kanker). Jumlah kandidat berkurang (CS: 2,39 juta →
+   1,24 juta) — masih jauh lebih dari cukup.
+
+2. **Mode Explore memakai paginasi `page=`, bukan cursor.** `sample=` tidak
+   kompatibel dengan cursor: request diterima HTTP 200 tapi `next_cursor`
+   selalu `null`, dan cursor hasilnya ditolak `"Invalid cursor value"`.
+   Paginasi `page=` biasa jalan dengan `sample`+`seed` dan halaman 2 terbukti
+   tidak overlap dengan halaman 1. Batas `sample` maksimum 10.000.
+   Mode Fokus tetap memakai cursor persis seperti rencana awal.
+   Konsekuensi: response `/api/feed` mengembalikan `nextCursor` yang isinya
+   cursor OpenAlex (fokus) atau nomor halaman (explore), plus `seed` di mode
+   explore supaya paginasinya konsisten antar request.
+
+3. **Ada filter `has_abstract:true`.** Dipakai langsung di query, jadi
+   "hanya paper yang punya abstract" terpenuhi di sisi OpenAlex tanpa perlu
+   menyaring manual setelah fetch.
+
+Selain itu: abstrak **masih** dikirim sebagai `abstract_inverted_index` (tidak
+ada field `abstract` polos), jadi fungsi konversi di bawah tetap dibutuhkan.
+Parameter `select=` dipakai untuk membatasi field yang diminta agar payload
+kecil.
 
 ### Re-ranking "Seimbang"
 ```
