@@ -1,19 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import ModeToggle from "@/components/feed/ModeToggle";
-import PaperCard from "@/components/feed/PaperCard";
+import PaperList from "@/components/feed/PaperList";
 import TopicChips from "@/components/feed/TopicChips";
-import ReaderOverlay from "@/components/reader/ReaderOverlay";
 import TopBar from "@/components/layout/TopBar";
 import { HookShimmer } from "@/components/ui/Shimmer";
 import { useFeed } from "@/hooks/useFeed";
 import { STORAGE_KEYS, useIsHydrated, useLocalStorage } from "@/hooks/useLocalStorage";
-import { useReadHistory, useSavedPapers } from "@/hooks/usePaperCollections";
-import { useReader } from "@/hooks/useReader";
-import { useViewportSummarize } from "@/hooks/useViewportSummarize";
+import { useReadHistory } from "@/hooks/usePaperCollections";
 import { TOPICS } from "@/lib/openalex";
-import type { FeedMode, Paper, TopicName } from "@/types";
+import type { FeedMode, TopicName } from "@/types";
 
 /** Identitas stabil supaya snapshot localStorage tidak berubah tiap render. */
 const EMPTY_TOPICS: TopicName[] = [];
@@ -34,8 +31,7 @@ function FeedSkeleton() {
 }
 
 export default function FeedPage() {
-  // Preferensi user. Topik pilihan diisi saat onboarding (Fase 4); sebelum itu
-  // seluruh topik yang tersedia dipakai sebagai default.
+  // Topik pilihan diisi saat onboarding; kalau kosong, seluruh topik dipakai.
   const { value: savedTopics } = useLocalStorage<TopicName[]>(
     STORAGE_KEYS.topics,
     EMPTY_TOPICS,
@@ -47,8 +43,7 @@ export default function FeedPage() {
   const { value: activeTopic, setValue: setActiveTopic } =
     useLocalStorage<TopicName | null>(STORAGE_KEYS.activeTopic, null);
 
-  const { saved, isSaved, toggleSaved } = useSavedPapers();
-  const { history, markAsRead } = useReadHistory();
+  const { history } = useReadHistory();
 
   const topics = useMemo(
     () => (savedTopics.length > 0 ? savedTopics : TOPICS),
@@ -57,8 +52,8 @@ export default function FeedPage() {
 
   const topic = activeTopic && topics.includes(activeTopic) ? activeTopic : topics[0]!;
 
-  // Tunggu localStorage selesai dibaca sebelum fetch, supaya feed tidak dimuat
-  // dua kali (sekali dengan default, sekali dengan preferensi asli).
+  // Tunggu localStorage terbaca sebelum fetch, supaya feed tidak dimuat dua
+  // kali (sekali dengan default, sekali dengan preferensi asli).
   const ready = useIsHydrated();
 
   const { papers, status, hasMore, loadMore, retry } = useFeed({
@@ -67,14 +62,6 @@ export default function FeedPage() {
     exclude: history,
     enabled: ready,
   });
-
-  const { summaries, getCardRef } = useViewportSummarize();
-
-  const handleOpened = useCallback(
-    (paper: Paper) => markAsRead(paper.id),
-    [markAsRead],
-  );
-  const { activePaper, open, close } = useReader(handleOpened);
 
   // Infinite scroll: sentinel di bawah daftar memicu batch berikutnya.
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -96,10 +83,7 @@ export default function FeedPage() {
 
   return (
     <>
-      <TopBar
-        title="baca."
-        trailing={<ModeToggle mode={mode} onChange={setMode} />}
-      />
+      <TopBar title="baca." trailing={<ModeToggle mode={mode} onChange={setMode} />} />
 
       <TopicChips topics={topics} active={topic} onChange={setActiveTopic} />
 
@@ -119,24 +103,15 @@ export default function FeedPage() {
               Coba lagi
             </button>
           </div>
-        ) : papers.length === 0 ? (
-          <div className="py-16 text-center font-ui text-sm text-on-d2">
-            Belum ada paper yang cocok. Coba topik atau mode lain.
-          </div>
         ) : (
-          <div className="flex flex-col gap-3.5">
-            {papers.map((paper) => (
-              <div key={paper.id} ref={getCardRef(paper.id)}>
-                <PaperCard
-                  paper={paper}
-                  state={summaries[paper.id]}
-                  isSaved={isSaved(paper.id)}
-                  onOpen={open}
-                  onToggleSave={toggleSaved}
-                />
+          <PaperList
+            papers={papers}
+            empty={
+              <div className="py-16 text-center font-ui text-sm text-on-d2">
+                Belum ada paper yang cocok. Coba topik atau mode lain.
               </div>
-            ))}
-          </div>
+            }
+          />
         )}
 
         <div ref={sentinelRef} className="h-px" aria-hidden="true" />
@@ -153,14 +128,6 @@ export default function FeedPage() {
           </p>
         )}
       </div>
-
-      <ReaderOverlay
-        paper={activePaper}
-        state={activePaper ? summaries[activePaper.id] : undefined}
-        isSaved={activePaper ? saved.some((p) => p.id === activePaper.id) : false}
-        onClose={close}
-        onToggleSave={toggleSaved}
-      />
     </>
   );
 }

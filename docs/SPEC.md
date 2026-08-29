@@ -249,6 +249,18 @@ Ekonomi:    #C4884D
 2. **Pilih Minat** — grid topik, minimum 3 dipilih. Topik: Kesehatan, AI, Neurosains, Lingkungan, Psikologi, Ekonomi (bisa ditambah nanti)
 3. **Masuk Feed** — langsung redirect ke feed, topik pertama yang dipilih jadi default
 
+> **Gerbang masuk:** `baca_onboarded` ada di localStorage, yang tidak bisa
+> dibaca server — jadi root (`/`) tidak bisa memutuskan tujuan redirect saat
+> render di server. Root dibuat sebagai layar splash: latar meja gelap dengan
+> logo, membaca localStorage, lalu mengarahkan ke `/onboarding` atau `/feed`.
+> Jeda sepersekian detik itu jadi terbaca sebagai splash PWA yang disengaja,
+> bukan kedipan. Pendekatan cookie + middleware sengaja dihindari supaya tidak
+> ada sumber kebenaran kedua di luar localStorage (Bagian 2).
+>
+> Splash dan onboarding tampil tanpa bottom nav (`AppShell` mengenali rute
+> tanpa chrome) — menawarkan navigasi ke halaman yang belum punya konteks
+> hanya membingungkan.
+
 ### 4.2 Feed Utama (halaman Home)
 - **Layout:** card scroll vertikal (2-4 kartu terlihat sekaligus)
 - **Chip filter** di atas: filter per topik berdasarkan pilihan onboarding
@@ -301,6 +313,20 @@ Ekonomi:    #C4884D
 - Statistik sederhana: jumlah paper dibaca, jumlah disimpan
 - Tombol "Reset" (hapus semua data lokal)
 - Info versi app
+
+> **Keputusan desain (Fase 4):** statistik ditulis sebagai satu kalimat
+> ("Kamu sudah membuka 12 paper dan menyimpan 3 di antaranya."), bukan deretan
+> kartu angka besar. Tiga kotak metrik raksasa adalah pola dashboard generik
+> dan menabrak aturan "satu aksen warna saja" di Bagian 3.
+>
+> Editor topik memakai `TopicPicker` yang sama dengan onboarding, dibuka
+> di tempat (bukan pindah halaman). Karena feed membaca `baca_topics` lewat
+> `useSyncExternalStore`, chip bar dan isi feed ikut ter-update sendiri begitu
+> topik disimpan — tidak perlu pemberitahuan manual (memenuhi Bagian 4.9).
+>
+> **Reset** menghapus keenam kunci `baca_*` termasuk `baca_onboarded`, lalu
+> mengarahkan kembali ke onboarding. Karena tidak bisa dibatalkan, tombolnya
+> dua langkah dengan konfirmasi eksplisit.
 
 ### 4.7 PWA
 - Web app manifest:
@@ -514,6 +540,7 @@ baca/
 │   │   │   └── AppShell.tsx
 │   │   ├── feed/
 │   │   │   ├── PaperCard.tsx
+│   │   │   ├── PaperList.tsx       # Kartu + summarize + reader, dipakai Feed/Search/Saved
 │   │   │   ├── TopicChips.tsx
 │   │   │   └── ModeToggle.tsx
 │   │   ├── reader/
@@ -521,8 +548,7 @@ baca/
 │   │   │   ├── QuickTake.tsx
 │   │   │   └── DeepRead.tsx
 │   │   ├── onboarding/
-│   │   │   ├── WelcomeStep.tsx
-│   │   │   └── TopicPickerStep.tsx
+│   │   │   └── TopicPicker.tsx     # Dipakai onboarding DAN edit topik di Profile
 │   │   └── ui/
 │   │       ├── Shimmer.tsx
 │   │       ├── Toast.tsx
@@ -536,7 +562,8 @@ baca/
 │   │   └── ratelimit.ts          # Upstash Ratelimit wrapper
 │   ├── hooks/
 │   │   ├── useFeed.ts            # Feed data fetching + state
-│   │   ├── useLocalStorage.ts    # Typed localStorage wrapper
+│   │   ├── useLocalStorage.ts    # localStorage bertipe (useSyncExternalStore)
+│   │   ├── usePaperCollections.ts   # Bookmark + riwayat baca
 │   │   ├── useReader.ts          # Reader overlay state
 │   │   └── useViewportSummarize.ts  # IntersectionObserver + concurrency limiter
 │   ├── styles/

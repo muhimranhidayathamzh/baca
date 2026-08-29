@@ -104,6 +104,24 @@ export function useLocalStorage<T>(key: string, fallback: T) {
 }
 
 /**
+ * Hapus seluruh data lokal app (SPEC.md Bagian 4.6 — tombol Reset).
+ *
+ * Hanya menyentuh kunci milik "baca.", jadi data situs lain di origin yang
+ * sama tidak ikut terhapus. Event sinkronisasi disebar sekali di akhir supaya
+ * semua komponen yang sedang membaca ikut menyegarkan diri.
+ */
+export function clearAllStorage(): void {
+  try {
+    for (const key of Object.values(STORAGE_KEYS)) {
+      window.localStorage.removeItem(key);
+    }
+    window.dispatchEvent(new Event(SYNC_EVENT));
+  } catch {
+    // Storage diblokir — tidak ada yang bisa dihapus.
+  }
+}
+
+/**
  * `false` saat render di server dan pada render hidrasi pertama, `true`
  * sesudahnya. Dipakai untuk menunda fetch sampai preferensi asli dari
  * localStorage benar-benar terbaca.
