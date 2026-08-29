@@ -12,7 +12,7 @@ export default function QuickTake({ items }: { items: string[] }) {
       <h3 className="mb-3 flex items-center gap-1.5 font-ui text-[11.5px] font-semibold uppercase tracking-[0.06em] text-page-ink2">
         <Zap size={14} strokeWidth={2} className="text-amber" />
         Quick take
-        <span className="font-normal normal-case tracking-normal text-page-ink2/70">
+        <span className="font-normal normal-case tracking-normal text-page-ink2">
           · 30 detik
         </span>
       </h3>

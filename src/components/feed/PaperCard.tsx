@@ -1,9 +1,10 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { Bookmark, Check, Share2 } from "lucide-react";
-import { useState } from "react";
+import { Bookmark, Share2 } from "lucide-react";
 import { HookShimmer } from "@/components/ui/Shimmer";
+import { useToast } from "@/components/ui/Toast";
+import { sharePaper, shareToastMessage } from "@/lib/share";
 import { TOPIC_DOT_COLOR, formatCardMeta, underlineVariant } from "@/lib/topics";
 import type { SummaryState } from "@/hooks/useViewportSummarize";
 import type { Paper } from "@/types";
@@ -48,34 +49,22 @@ export default function PaperCard({
   onOpen,
   onToggleSave,
 }: PaperCardProps) {
-  const [justCopied, setJustCopied] = useState(false);
+  const toast = useToast();
 
   const isReady = state?.status === "done";
   const summary = isReady ? state.summary : null;
 
   async function handleShare(event: React.MouseEvent) {
     event.stopPropagation();
-    const shareTitle = summary?.hook ?? paper.title;
+    const outcome = await sharePaper(summary?.hook ?? paper.title, paper.url);
+    const message = shareToastMessage(outcome);
+    if (message) toast.show(message);
+  }
 
-    // Web Share API kalau tersedia (SPEC.md Bagian 4.8), kalau tidak salin
-    // tautannya ke clipboard.
-    if (typeof navigator !== "undefined" && navigator.share) {
-      try {
-        await navigator.share({ title: shareTitle, url: paper.url });
-        return;
-      } catch {
-        // User membatalkan share — jangan perlakukan sebagai error.
-        return;
-      }
-    }
-
-    try {
-      await navigator.clipboard.writeText(paper.url);
-      setJustCopied(true);
-      setTimeout(() => setJustCopied(false), 1600);
-    } catch {
-      // Clipboard diblokir — tidak ada yang bisa dilakukan, jangan crash.
-    }
+  function handleToggleSave(event: React.MouseEvent) {
+    event.stopPropagation();
+    onToggleSave(paper);
+    toast.show(isSaved ? "Dihapus dari tersimpan" : "Disimpan");
   }
 
   return (
@@ -149,10 +138,7 @@ export default function PaperCard({
         <div className="flex shrink-0 items-center gap-4">
           <button
             type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleSave(paper);
-            }}
+            onClick={handleToggleSave}
             aria-label={isSaved ? "Hapus dari tersimpan" : "Simpan paper"}
             aria-pressed={isSaved}
             className="text-on-d3 transition-colors hover:text-on-d2"
@@ -176,11 +162,7 @@ export default function PaperCard({
             aria-label="Bagikan paper"
             className="text-on-d3 transition-colors hover:text-on-d2"
           >
-            {justCopied ? (
-              <Check size={18} strokeWidth={1.75} className="text-amber" />
-            ) : (
-              <Share2 size={18} strokeWidth={1.75} />
-            )}
+            <Share2 size={18} strokeWidth={1.75} />
           </button>
         </div>
       </div>

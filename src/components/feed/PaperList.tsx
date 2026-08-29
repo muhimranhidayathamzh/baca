@@ -3,6 +3,7 @@
 import { useCallback, type ReactNode } from "react";
 import PaperCard from "./PaperCard";
 import ReaderOverlay from "@/components/reader/ReaderOverlay";
+import { trackPaperOpened } from "@/lib/analytics";
 import { useReadHistory, useSavedPapers } from "@/hooks/usePaperCollections";
 import { useReader } from "@/hooks/useReader";
 import { useViewportSummarize } from "@/hooks/useViewportSummarize";
@@ -30,7 +31,13 @@ export default function PaperList({
 
   // Paper dihitung "sudah dibaca" saat reading view-nya dibuka — inilah yang
   // membuatnya tidak muncul lagi di feed berikutnya.
-  const handleOpened = useCallback((paper: Paper) => markAsRead(paper.id), [markAsRead]);
+  const handleOpened = useCallback(
+    (paper: Paper) => {
+      markAsRead(paper.id);
+      trackPaperOpened(paper.id, paper.topic);
+    },
+    [markAsRead],
+  );
   const { activePaper, open, close } = useReader(handleOpened);
 
   if (papers.length === 0) return <>{empty ?? null}</>;

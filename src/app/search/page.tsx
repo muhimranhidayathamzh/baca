@@ -1,9 +1,12 @@
 "use client";
 
-import { Search as SearchIcon, X } from "lucide-react";
+import { Search as SearchIcon, WifiOff, X } from "lucide-react";
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import PaperList from "@/components/feed/PaperList";
+import EmptyState from "@/components/ui/EmptyState";
 import { HookShimmer } from "@/components/ui/Shimmer";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import type { Paper, SearchResponse } from "@/types";
 
 /** Jeda sebelum mengetik dianggap selesai — hemat kuota, hemat rate limit. */
@@ -26,6 +29,7 @@ export default function SearchPage() {
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
   const [result, setResult] = useState<Result>(INITIAL);
+  const isOnline = useOnlineStatus();
 
   const abortRef = useRef<AbortController | null>(null);
   const requestIdRef = useRef(0);
@@ -150,10 +154,10 @@ export default function SearchPage() {
 
       <div className="px-4 pt-3">
         {status === "idle" ? (
-          <p className="mx-auto max-w-[17rem] py-20 text-center font-serif-read text-[15px] leading-relaxed text-on-d3">
-            Cari apa pun yang lagi kamu pikirin. Hasilnya dari paper open access
-            terbaru.
-          </p>
+          <EmptyState
+            title="Cari apa pun yang lagi kamu pikirin."
+            hint="Hasilnya diambil dari paper open access terbaru di OpenAlex."
+          />
         ) : status === "loading" ? (
           <div className="flex flex-col gap-3.5">
             {[0, 1, 2].map((i) => (
@@ -167,26 +171,41 @@ export default function SearchPage() {
             ))}
           </div>
         ) : status === "error" ? (
-          <div className="flex flex-col items-center gap-3 py-16 text-center">
-            <p className="max-w-xs font-ui text-sm text-on-d2">
-              Pencarian gagal. Cek koneksi kamu, lalu coba lagi.
-            </p>
-            <button
-              type="button"
-              onClick={() => void runSearch(debounced, 1, false)}
-              className="rounded-full border border-desk-line px-4 py-2 font-ui text-[13px] text-on-d"
-            >
-              Coba lagi
-            </button>
-          </div>
+          <EmptyState
+            icon={isOnline ? undefined : WifiOff}
+            title={isOnline ? "Pencarian gagal." : "Pencarian butuh koneksi internet."}
+            hint={
+              isOnline
+                ? "Bisa jadi gangguan sementara. Coba lagi sebentar lagi."
+                : "Paper yang sudah kamu simpan tetap bisa dibaca sekarang."
+            }
+            action={
+              isOnline ? (
+                <button
+                  type="button"
+                  onClick={() => void runSearch(debounced, 1, false)}
+                  className="rounded-full border border-desk-line px-4 py-2 font-ui text-[13px] text-on-d"
+                >
+                  Coba lagi
+                </button>
+              ) : (
+                <Link
+                  href="/saved"
+                  className="rounded-full border border-desk-line px-4 py-2 font-ui text-[13px] text-on-d"
+                >
+                  Buka tersimpan
+                </Link>
+              )
+            }
+          />
         ) : (
           <PaperList
             papers={papers}
             empty={
-              <p className="mx-auto max-w-[17rem] py-20 text-center font-serif-read text-[15px] leading-relaxed text-on-d3">
-                Nggak ada yang cocok buat “{debounced}”. Coba kata kunci yang
-                lebih umum.
-              </p>
+              <EmptyState
+                title={`Nggak ada yang cocok buat “${debounced}”.`}
+                hint="Coba kata kunci yang lebih umum, atau pakai istilah bahasa Inggris — sebagian besar paper ditulis dalam bahasa itu."
+              />
             }
           />
         )}

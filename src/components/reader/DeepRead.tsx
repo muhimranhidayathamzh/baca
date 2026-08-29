@@ -28,7 +28,7 @@ export default function DeepRead({
         <span className="flex items-center gap-1.5 font-ui text-[11.5px] font-semibold uppercase tracking-[0.06em] text-page-ink2">
           <BookOpen size={14} strokeWidth={2} className="text-amber" />
           Deep read
-          <span className="font-normal normal-case tracking-normal text-page-ink2/70">
+          <span className="font-normal normal-case tracking-normal text-page-ink2">
             · {readingMinutes} mnt
           </span>
         </span>

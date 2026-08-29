@@ -3,28 +3,72 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#1B1E24" />
     <title>baca. — Offline</title>
     <style>
-      html, body {
+      /* Halaman ini disajikan service worker saat navigasi gagal, jadi ia
+         tidak bisa memakai CSS bundle app — gayanya harus berdiri sendiri.
+         Warnanya disalin dari token SPEC Bagian 3. */
+      html,
+      body {
         height: 100%;
         margin: 0;
+        background: #1b1e24;
+        color: #e5e0d4;
+        font-family: system-ui, -apple-system, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      body {
         display: flex;
         align-items: center;
         justify-content: center;
-        background: #1b1e24;
-        color: #e5e0d4;
-        font-family: system-ui, sans-serif;
         text-align: center;
       }
-      main { padding: 2rem; max-width: 22rem; }
-      h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
-      p { color: #95999f; font-size: 0.9rem; line-height: 1.5; }
+      main {
+        padding: 2rem;
+        max-width: 20rem;
+      }
+      .brand {
+        font-size: 2rem;
+        font-weight: 600;
+        letter-spacing: -0.03em;
+        margin: 0 0 1.25rem;
+      }
+      .dot {
+        color: #d9a04e;
+      }
+      p {
+        color: #95999f;
+        font-size: 0.9rem;
+        line-height: 1.6;
+        margin: 0;
+      }
+      .hint {
+        color: #6a6e75;
+        font-size: 0.8rem;
+        margin-top: 0.5rem;
+      }
+      a {
+        display: inline-block;
+        margin-top: 1.75rem;
+        padding: 0.65rem 1.1rem;
+        border: 1px solid #33383f;
+        border-radius: 999px;
+        color: #e5e0d4;
+        font-size: 0.85rem;
+        text-decoration: none;
+      }
     </style>
   </head>
   <body>
     <main>
-      <h1>baca.</h1>
-      <p>Kamu sedang offline. Sambungkan kembali ke internet untuk lanjut membaca.</p>
+      <p class="brand">baca<span class="dot">.</span></p>
+      <p>Kamu sedang offline.</p>
+      <p class="hint">
+        Paper yang sudah kamu simpan tetap tersimpan di perangkat ini dan bisa
+        dibaca sekarang juga.
+      </p>
+      <a href="/saved">Buka paper tersimpan</a>
     </main>
   </body>
 </html>

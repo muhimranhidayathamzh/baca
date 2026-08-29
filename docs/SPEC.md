@@ -175,7 +175,7 @@ Dua momen berbeda saat baca: **menjelajah** (santai, scan) dan **membaca** (foku
 --desk-line: #33383F    (border)
 --on-d:      #E5E0D4    (teks primer di gelap)
 --on-d2:     #95999F    (teks sekunder)
---on-d3:     #6A6E75    (teks tersier)
+--on-d3:     #8E9299    (teks tersier — lihat catatan kontras di bawah)
 
 // Halaman terang (reading view)
 --page:      #EBE5D6
@@ -188,6 +188,25 @@ Dua momen berbeda saat baca: **menjelajah** (santai, scan) dan **membaca** (foku
 --amber:     #D9A04E    (lampu, underline, highlight)
 --amber-lo:  rgba(217,160,78,.12)
 ```
+
+> **Catatan kontras (audit Fase 5 langkah 32).** `--on-d3` awalnya `#6A6E75`,
+> tapi nilai itu hanya mencapai **2.92:1** di atas kartu dan 3.26:1 di atas
+> meja — gagal WCAG AA yang menuntut 4.5:1 untuk teks kecil. Karena token itu
+> dipakai untuk teks informasional (meta kartu, label nav, judul seksi
+> Profile), bukan hiasan, nilainya dinaikkan ke `#8E9299` = **4.79:1** di
+> kartu dan 5.34:1 di meja. Konsekuensinya on-d2 dan on-d3 jadi berdekatan;
+> hierarki tetap terbaca karena dibawa ukuran dan keluarga font, bukan warna
+> sendirian.
+>
+> Token lain lolos apa adanya: on-d 11.37:1, on-d2 5.23:1, amber 6.48:1,
+> page-ink 12.89:1, page-ink2 4.71:1 (semuanya di atas 4.5).
+>
+> **Amber di halaman terang hanya 1.84:1**, jadi amber TIDAK PERNAH boleh
+> dipakai sebagai teks di reading view — hanya sebagai ikon dan penanda yang
+> selalu berdampingan dengan label teks. Jangan pakai untuk tulisan.
+>
+> Hindari juga modifier opasitas pada warna teks (mis. `text-page-ink2/70`):
+> itu sempat menurunkan kontras ke 2.72:1 walau token dasarnya lulus.
 
 ### Tipografi
 ```
@@ -337,6 +356,26 @@ Ekonomi:    #C4884D
   - icons: 192x192 + 512x512 (PNG, maskable)
 - Service worker: cache shell app + offline fallback page
 - Installable di Android & iOS homescreen
+
+> **Ikon (Fase 5 langkah 28).** Manifest sebelumnya menunjuk
+> `/icons/icon-192.png` dan `/icons/icon-512.png` yang **tidak pernah dibuat**,
+> jadi PWA-nya tidak benar-benar installable. Ikon sekarang di-generate dari
+> token Bagian 3 (desk sebagai ground, huruf "b" on-d, titik amber, pendar
+> lampu hangat dari bawah) dalam empat varian:
+> - `icon-192.png` / `icon-512.png` — `purpose: "any"`
+> - `icon-192-maskable.png` / `icon-512-maskable.png` — `purpose: "maskable"`,
+>   marka lebih kecil agar aman di zona potong launcher
+> - `apple-touch-icon.png` (180px) — iOS tidak membaca manifest untuk ikon
+>   homescreen, ia butuh tag terpisah
+>
+> Ikon maskable-only saja tidak cukup: launcher yang memakainya sebagai ikon
+> biasa akan memotongnya karena mengasumsikan ada padding aman.
+>
+> **Strategi offline.** Paper yang di-bookmark disimpan utuh di localStorage,
+> jadi halaman `/saved` berfungsi penuh tanpa internet — bukan sekadar pesan
+> error. Banner offline muncul di semua halaman ber-chrome dan menawarkan
+> jalan ke sana; `offline.html` (fallback untuk rute yang belum ter-cache)
+> juga menunjuk ke sana.
 
 ### 4.8 Share
 - Tap icon share di kartu → gunakan **Web Share API** (`navigator.share()`)
@@ -678,6 +717,45 @@ UPSTASH_REDIS_REST_TOKEN=   # dari upstash.com console
 30. Deploy ke Vercel
 31. Test di mobile (Android + iOS — catatan: PWA iOS lebih terbatas, tanpa push notification)
 32. Audit aksesibilitas dasar
+
+> **Metrik (langkah 29).** Dua metrik di atas tidak bisa dijawab pageview
+> biasa — membuka reader dan mengklik "Buka paper asli" sama-sama terjadi tanpa
+> perpindahan halaman. Karena itu dipasang dua event kustom di
+> `lib/analytics.ts`: `paper_opened` (reader dibuka) dan
+> `original_paper_opened` (tautan sumber diklik). Keduanya hanya mengirim id
+> paper dan nama topik — tidak ada yang bisa mengidentifikasi orang.
+> `track()` tidak melakukan apa-apa di luar produksi Vercel.
+
+---
+
+## 11. CATATAN DEPLOY
+
+### Environment variable yang WAJIB diisi di Vercel
+
+| Variable | Akibat kalau kosong |
+|---|---|
+| `UPSTASH_REDIS_REST_URL` | **Seluruh API route balas 429.** App tampak rusak total. |
+| `UPSTASH_REDIS_REST_TOKEN` | Sama seperti di atas. |
+| `GEMINI_API_KEY` | Kartu tampil, tapi semua ringkasan jatuh ke fallback (hook = judul asli, tanpa garis bawah amber). |
+| `SUPABASE_URL` | Cache summary mati — tiap user memicu panggilan AI baru untuk paper yang sama. |
+| `SUPABASE_SERVICE_KEY` | Sama seperti di atas. Gunakan service_role key, BUKAN anon key. |
+| `OPENALEX_API_KEY` | App tetap jalan lewat polite pool, tapi kuotanya hanya ~1.000 request/hari **per IP** — terlalu kecil untuk produksi. |
+
+> **Yang paling gampang bikin panik:** rate limiting sengaja *fail closed* di
+> produksi (Bagian 2). Deploy tanpa kredensial Upstash membuat `/api/feed`,
+> `/api/search`, dan `/api/summarize` semuanya membalas 429 dan feed tampak
+> kosong total. Ini bukan bug — isi env-nya dulu.
+
+### Checklist uji perangkat (langkah 31)
+Butuh perangkat fisik, tidak bisa diverifikasi dari emulator:
+- [ ] Android: "Tambahkan ke layar utama" memunculkan ikon maskable tanpa terpotong
+- [ ] Android: app terbuka standalone (tanpa address bar), status bar gelap
+- [ ] iOS Safari: apple-touch-icon tampil benar di homescreen
+- [ ] iOS: swipe-down menutup reader tanpa berebut dengan gesture sistem
+- [ ] iOS: `100dvh`/`94dvh` tidak terpotong toolbar Safari
+- [ ] Keduanya: transisi gelap→terang tetap 60fps di perangkat kelas menengah
+- [ ] Keduanya: matikan data seluler → banner offline muncul, `/saved` tetap terbaca
+- [ ] Lighthouse mobile di URL produksi: Performance > 90 (Standar Kualitas Bagian 2)
 
 ---
 

@@ -6,6 +6,9 @@ import { useEffect } from "react";
 import DeepRead from "./DeepRead";
 import QuickTake from "./QuickTake";
 import Shimmer from "@/components/ui/Shimmer";
+import { useToast } from "@/components/ui/Toast";
+import { trackOriginalPaperOpened } from "@/lib/analytics";
+import { sharePaper, shareToastMessage } from "@/lib/share";
 import { TOPIC_DOT_COLOR, formatAuthors } from "@/lib/topics";
 import type { SummaryState } from "@/hooks/useViewportSummarize";
 import type { Paper } from "@/types";
@@ -43,6 +46,7 @@ export default function ReaderOverlay({
   onToggleSave,
 }: ReaderOverlayProps) {
   const dragControls = useDragControls();
+  const toast = useToast();
 
   // Kunci scroll halaman di belakang selama reader terbuka.
   useEffect(() => {
@@ -71,19 +75,14 @@ export default function ReaderOverlay({
   async function handleShare() {
     if (!paper) return;
     const title = state?.status === "done" ? state.summary.hook : paper.title;
-    if (typeof navigator !== "undefined" && navigator.share) {
-      try {
-        await navigator.share({ title, url: paper.url });
-      } catch {
-        // Dibatalkan user.
-      }
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(paper.url);
-    } catch {
-      // Clipboard diblokir.
-    }
+    const message = shareToastMessage(await sharePaper(title, paper.url));
+    if (message) toast.show(message);
+  }
+
+  function handleToggleSave() {
+    if (!paper) return;
+    onToggleSave(paper);
+    toast.show(isSaved ? "Dihapus dari tersimpan" : "Disimpan");
   }
 
   const summary = state?.status === "done" ? state.summary : null;
@@ -144,7 +143,7 @@ export default function ReaderOverlay({
                 <div className="flex items-center gap-4">
                   <button
                     type="button"
-                    onClick={() => onToggleSave(paper)}
+                    onClick={handleToggleSave}
                     aria-label={isSaved ? "Hapus dari tersimpan" : "Simpan paper"}
                     aria-pressed={isSaved}
                     className="p-1 text-page-ink2"
@@ -239,6 +238,9 @@ export default function ReaderOverlay({
                 href={paper.url}
                 target="_blank"
                 rel="noopener noreferrer"
+                // Metrik utama SPEC Bagian 9 langkah 29: berapa % user yang
+                // benar-benar sampai ke paper aslinya.
+                onClick={() => trackOriginalPaperOpened(paper.id, paper.topic)}
                 className="mt-5 flex items-center justify-center gap-2 rounded-[12px] bg-page-ink px-4 py-3.5 font-ui text-[14.5px] font-medium text-page"
               >
                 <ExternalLink size={17} strokeWidth={1.75} />
@@ -247,7 +249,7 @@ export default function ReaderOverlay({
 
               <motion.p
                 variants={itemVariants}
-                className="mt-4 flex items-center justify-center gap-1.5 text-center font-ui text-[11.5px] leading-relaxed text-page-ink2/80"
+                className="mt-4 flex items-center justify-center gap-1.5 text-center font-ui text-[11.5px] leading-relaxed text-page-ink2"
               >
                 <Info size={13} strokeWidth={1.75} className="shrink-0" />
                 Ringkasan otomatis — selalu cek sumber asli

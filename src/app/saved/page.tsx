@@ -4,6 +4,7 @@ import { Bookmark } from "lucide-react";
 import Link from "next/link";
 import PaperList from "@/components/feed/PaperList";
 import TopBar from "@/components/layout/TopBar";
+import EmptyState from "@/components/ui/EmptyState";
 import { useIsHydrated } from "@/hooks/useLocalStorage";
 import { useSavedPapers } from "@/hooks/usePaperCollections";
 
@@ -36,21 +37,19 @@ export default function SavedPage() {
           <PaperList
             papers={saved}
             empty={
-              <div className="flex flex-col items-center px-6 py-20 text-center">
-                <Bookmark size={26} strokeWidth={1.5} className="mb-4 text-on-d3" />
-                <p className="max-w-[17rem] font-serif-read text-[15px] leading-relaxed text-on-d2">
-                  Belum ada yang disimpan.
-                </p>
-                <p className="mt-2 max-w-[17rem] font-ui text-[13px] leading-relaxed text-on-d3">
-                  Tap ikon bookmark di kartu mana pun buat menyimpannya ke sini.
-                </p>
-                <Link
-                  href="/feed"
-                  className="mt-6 rounded-full border border-desk-line px-4 py-2 font-ui text-[13px] text-on-d"
-                >
-                  Jelajahi feed
-                </Link>
-              </div>
+              <EmptyState
+                icon={Bookmark}
+                title="Belum ada yang disimpan."
+                hint="Tap ikon bookmark di kartu mana pun buat menyimpannya ke sini — bisa dibaca lagi walau sedang offline."
+                action={
+                  <Link
+                    href="/feed"
+                    className="rounded-full border border-desk-line px-4 py-2 font-ui text-[13px] text-on-d"
+                  >
+                    Jelajahi feed
+                  </Link>
+                }
+              />
             }
           />
         )}

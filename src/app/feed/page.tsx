@@ -1,13 +1,17 @@
 "use client";
 
+import { WifiOff } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useMemo, useRef } from "react";
 import ModeToggle from "@/components/feed/ModeToggle";
 import PaperList from "@/components/feed/PaperList";
 import TopicChips from "@/components/feed/TopicChips";
 import TopBar from "@/components/layout/TopBar";
+import EmptyState from "@/components/ui/EmptyState";
 import { HookShimmer } from "@/components/ui/Shimmer";
 import { useFeed } from "@/hooks/useFeed";
 import { STORAGE_KEYS, useIsHydrated, useLocalStorage } from "@/hooks/useLocalStorage";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { useReadHistory } from "@/hooks/usePaperCollections";
 import { TOPICS } from "@/lib/openalex";
 import type { FeedMode, TopicName } from "@/types";
@@ -44,6 +48,7 @@ export default function FeedPage() {
     useLocalStorage<TopicName | null>(STORAGE_KEYS.activeTopic, null);
 
   const { history } = useReadHistory();
+  const isOnline = useOnlineStatus();
 
   const topics = useMemo(
     () => (savedTopics.length > 0 ? savedTopics : TOPICS),
@@ -91,25 +96,45 @@ export default function FeedPage() {
         {isInitialLoading ? (
           <FeedSkeleton />
         ) : status === "error" && papers.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 py-16 text-center">
-            <p className="max-w-xs font-ui text-sm text-on-d2">
-              Gagal memuat feed. Cek koneksi kamu, lalu coba lagi.
-            </p>
-            <button
-              type="button"
-              onClick={retry}
-              className="rounded-full border border-desk-line px-4 py-2 font-ui text-[13px] text-on-d"
-            >
-              Coba lagi
-            </button>
-          </div>
+          <EmptyState
+            icon={isOnline ? undefined : WifiOff}
+            title={
+              isOnline
+                ? "Gagal memuat feed."
+                : "Feed butuh koneksi internet."
+            }
+            hint={
+              isOnline
+                ? "Bisa jadi gangguan sementara. Coba lagi sebentar lagi."
+                : "Paper yang sudah kamu simpan tetap bisa dibaca sekarang."
+            }
+            action={
+              isOnline ? (
+                <button
+                  type="button"
+                  onClick={retry}
+                  className="rounded-full border border-desk-line px-4 py-2 font-ui text-[13px] text-on-d"
+                >
+                  Coba lagi
+                </button>
+              ) : (
+                <Link
+                  href="/saved"
+                  className="rounded-full border border-desk-line px-4 py-2 font-ui text-[13px] text-on-d"
+                >
+                  Buka tersimpan
+                </Link>
+              )
+            }
+          />
         ) : (
           <PaperList
             papers={papers}
             empty={
-              <div className="py-16 text-center font-ui text-sm text-on-d2">
-                Belum ada paper yang cocok. Coba topik atau mode lain.
-              </div>
+              <EmptyState
+                title="Belum ada paper yang cocok."
+                hint="Coba topik lain, atau pindah ke mode Explore buat sesuatu yang tak terduga."
+              />
             }
           />
         )}
