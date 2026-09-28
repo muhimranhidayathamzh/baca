@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { Bookmark, Home, Search, User } from "lucide-react";
 import type { ComponentType } from "react";
 
@@ -39,7 +39,7 @@ export default function BottomNav() {
                 aria-current={isActive ? "page" : undefined}
               >
                 {isActive && (
-                  <motion.span
+                  <m.span
                     layoutId="bottom-nav-indicator"
                     className="absolute inset-x-3 top-0 h-0.5 rounded-full bg-amber"
                     transition={{ type: "spring", damping: 25, stiffness: 300 }}

@@ -1,6 +1,29 @@
 import type { TopicName } from "@/types";
 
 /**
+ * Pemetaan topik Indonesia → field OpenAlex (SPEC.md Bagian 6).
+ * ID diverifikasi terhadap endpoint /fields yang live.
+ *
+ * Tinggal di sini, bukan di openalex.ts, karena komponen browser (feed,
+ * onboarding, profile) butuh daftar topiknya — sementara openalex.ts adalah
+ * modul server-only yang tidak boleh ikut ke bundle browser.
+ */
+export const TOPIC_TO_FIELD: Record<TopicName, string> = {
+  Kesehatan: "fields/27", // Medicine
+  AI: "fields/17", // Computer Science
+  Neurosains: "fields/28", // Neuroscience
+  Lingkungan: "fields/23", // Environmental Science
+  Psikologi: "fields/32", // Psychology
+  Ekonomi: "fields/20", // Economics, Econometrics and Finance
+};
+
+export const TOPICS = Object.keys(TOPIC_TO_FIELD) as TopicName[];
+
+export function isTopicName(value: string): value is TopicName {
+  return value in TOPIC_TO_FIELD;
+}
+
+/**
  * Warna topik (SPEC.md Bagian 3) — dipakai HANYA sebagai titik kecil di kartu,
  * bukan badge warna-warni. Aksen app tetap satu: amber.
  *

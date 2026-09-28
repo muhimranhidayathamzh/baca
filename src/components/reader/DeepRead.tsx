@@ -1,6 +1,6 @@
 "use client";
 
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 import { BookOpen, ChevronDown } from "lucide-react";
 import { useState } from "react";
 
@@ -33,18 +33,18 @@ export default function DeepRead({
           </span>
         </span>
 
-        <motion.span
+        <m.span
           animate={{ rotate: isOpen ? 180 : 0 }}
           transition={{ type: "spring", damping: 25, stiffness: 300 }}
           className="text-page-ink2"
         >
           <ChevronDown size={18} strokeWidth={1.75} />
-        </motion.span>
+        </m.span>
       </button>
 
       <AnimatePresence initial={false}>
         {isOpen && (
-          <motion.div
+          <m.div
             key="deep-body"
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
@@ -55,7 +55,7 @@ export default function DeepRead({
             <p className="pb-4 font-serif-read text-[15px] leading-[1.72] text-page-ink">
               {text}
             </p>
-          </motion.div>
+          </m.div>
         )}
       </AnimatePresence>
     </section>

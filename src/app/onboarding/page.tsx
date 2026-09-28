@@ -1,6 +1,6 @@
 "use client";
 
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import TopicPicker from "@/components/onboarding/TopicPicker";
@@ -47,66 +47,61 @@ export default function OnboardingPage() {
   const remaining = MIN_TOPICS - picked.length;
 
   return (
-    <main className="flex flex-1 flex-col px-6 pb-8 pt-16">
-      <AnimatePresence mode="wait">
+    <main className="relative flex flex-1 flex-col overflow-hidden px-6 pb-8 pt-16">
+      {/*
+        Pendar lampu baca hangat naik dari bawah — bahasa visual yang sama
+        dengan ikon app di homescreen, jadi layar pertama terasa menyambung
+        dengan ikon yang baru saja diketuk. Statis, tanpa JS.
+      */}
+      {step === 0 && <div className="lamp-glow" aria-hidden="true" />}
+
+      <AnimatePresence mode="wait" initial={false}>
         {step === 0 ? (
-          <motion.div
+          /*
+            Layar Welcome sengaja TIDAK memakai animasi masuk berbasis JS.
+            Tagline adalah elemen LCP halaman ini; Framer Motion me-render
+            `opacity: 0` di HTML server, sehingga teks baru tampil setelah JS
+            dimuat dan di-hydrate — audit Lighthouse mengukurnya LCP 3,3 s.
+            Animasi masuknya kini CSS murni (globals.css) yang jalan sejak
+            paint pertama, dan tagline tidak pernah disembunyikan.
+          */
+          <m.div
             key="welcome"
-            className="flex flex-1 flex-col"
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
+            className="relative flex flex-1 flex-col"
             exit={{ opacity: 0, y: -12 }}
             transition={SPRING}
           >
             <div className="flex flex-1 flex-col justify-center">
-              <motion.h1
-                className="font-grotesk text-[44px] font-medium leading-none tracking-[-0.03em] text-on-d"
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ ...SPRING, delay: 0.1 }}
-              >
+              <h1 className="enter-fade-up font-grotesk text-[44px] font-medium leading-none tracking-[-0.03em] text-on-d">
                 baca<span className="text-amber">.</span>
-              </motion.h1>
+              </h1>
 
-              <motion.p
-                className="mt-5 max-w-[19rem] font-serif-read text-[19px] leading-[1.5] text-on-d2"
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ ...SPRING, delay: 0.22 }}
-              >
+              <p className="mt-5 max-w-[19rem] font-serif-read text-[19px] leading-[1.5] text-on-d2">
                 Riset terbaru, ditulis ulang dalam{" "}
                 {/*
                   Garis bawah signature digambar masuk seperti coretan pulpen.
                   Ini perkenalan bahasa visualnya: saat user melihat hook
                   pertama di feed, coretan ini sudah terasa familiar.
                 */}
-                <motion.span
-                  className="underline-amber-2 text-on-d"
-                  initial={{ backgroundSize: "0% 0.5em" }}
-                  animate={{ backgroundSize: "100% 0.5em" }}
-                  transition={{ duration: 0.55, delay: 0.6, ease: [0.32, 0.72, 0, 1] }}
-                >
+                <span className="underline-amber-2 underline-draw text-on-d">
                   bahasa yang kamu ngerti
-                </motion.span>
+                </span>
                 .
-              </motion.p>
+              </p>
             </div>
 
-            <motion.button
+            <m.button
               type="button"
               onClick={() => setStep(1)}
               whileTap={{ scale: 0.985 }}
               transition={SPRING}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="w-full rounded-[14px] bg-amber py-3.5 font-ui text-[15px] font-medium text-desk"
-              style={{ transitionDelay: "0.4s" }}
+              className="enter-fade-up enter-delay-2 w-full rounded-[14px] bg-amber py-3.5 font-ui text-[15px] font-medium text-desk"
             >
               Mulai
-            </motion.button>
-          </motion.div>
+            </m.button>
+          </m.div>
         ) : (
-          <motion.div
+          <m.div
             key="topics"
             className="flex flex-1 flex-col"
             initial={{ opacity: 0, y: 12 }}
@@ -137,7 +132,7 @@ export default function OnboardingPage() {
                 : `${picked.length} topik dipilih`}
             </p>
 
-            <motion.button
+            <m.button
               type="button"
               onClick={finish}
               disabled={picked.length < MIN_TOPICS}
@@ -147,8 +142,8 @@ export default function OnboardingPage() {
               className="w-full rounded-[14px] bg-amber py-3.5 font-ui text-[15px] font-medium text-desk disabled:cursor-not-allowed"
             >
               Masuk ke feed
-            </motion.button>
-          </motion.div>
+            </m.button>
+          </m.div>
         )}
       </AnimatePresence>
     </main>

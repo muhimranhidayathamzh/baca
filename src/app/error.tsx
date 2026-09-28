@@ -21,7 +21,7 @@ export default function GlobalError({
   }, [error]);
 
   return (
-    <main className="flex flex-1 flex-col items-center justify-center px-8 text-center">
+    <div className="flex flex-1 flex-col items-center justify-center px-8 py-20 text-center">
       <p className="max-w-[18rem] font-serif-read text-[16px] leading-relaxed text-on-d2">
         Ada yang tidak beres di sisi kami.
       </p>
@@ -37,6 +37,6 @@ export default function GlobalError({
         <RotateCw size={15} strokeWidth={1.75} />
         Coba lagi
       </button>
-    </main>
+    </div>
   );
 }

@@ -129,6 +129,9 @@ export default function SearchPage() {
         className="sticky top-0 z-40 border-b border-desk-line bg-desk/90 px-4 py-3 backdrop-blur-sm"
         style={{ paddingTop: "calc(0.75rem + env(safe-area-inset-top))" }}
       >
+        {/* Halaman ini tidak memakai TopBar (kolom cari menggantikan judul),
+            jadi judulnya disediakan khusus untuk pembaca layar. */}
+        <h1 className="sr-only">Cari paper</h1>
         <div className="flex items-center gap-2.5 rounded-full border border-desk-line bg-desk-2 px-4 py-2.5 focus-within:border-amber/50">
           <SearchIcon size={17} strokeWidth={1.75} className="shrink-0 text-on-d3" />
           <input

@@ -1,5 +1,6 @@
+import "server-only";
 import { Ratelimit } from "@upstash/ratelimit";
-import { Redis } from "@upstash/redis";
+import { getRedis } from "./redis";
 
 /**
  * Rate limiting untuk semua API route (CLAUDE.md aturan #4 — non-negotiable).
@@ -12,18 +13,15 @@ import { Redis } from "@upstash/redis";
 
 const isProduction = process.env.NODE_ENV === "production";
 
-function readUpstashConfig(): { url: string; token: string } | null {
-  const url = process.env.UPSTASH_REDIS_REST_URL?.trim();
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN?.trim();
-  if (!url || !token) return null;
-  return { url, token };
-}
-
 /** Batas per endpoint, sesuai SPEC.md Bagian 2. */
 export const LIMITS = {
   feed: { requests: 60, window: "1 m" },
   summarize: { requests: 30, window: "1 m" },
   search: { requests: 60, window: "1 m" },
+  /** Penghitung metrik anonim — longgar, tapi tetap dibatasi agar tak bisa dibanjiri. */
+  event: { requests: 120, window: "1 m" },
+  /** Endpoint statistik pemilik — ketat, karena ada token yang bisa ditebak-tebak. */
+  stats: { requests: 10, window: "1 m" },
 } as const;
 
 export type LimitName = keyof typeof LIMITS;
@@ -31,15 +29,15 @@ export type LimitName = keyof typeof LIMITS;
 const upstashLimiters = new Map<LimitName, Ratelimit>();
 
 function getUpstashLimiter(name: LimitName): Ratelimit | null {
-  const config = readUpstashConfig();
-  if (!config) return null;
+  const redis = getRedis();
+  if (!redis) return null;
 
   const cached = upstashLimiters.get(name);
   if (cached) return cached;
 
   const { requests, window } = LIMITS[name];
   const limiter = new Ratelimit({
-    redis: new Redis({ url: config.url, token: config.token }),
+    redis,
     limiter: Ratelimit.slidingWindow(requests, window),
     analytics: false,
     prefix: `baca:${name}`,
@@ -139,6 +137,11 @@ export async function checkRateLimit(
 export function tooManyRequests(): Response {
   return Response.json(
     { error: "Too many requests" },
-    { status: 429, headers: { "Retry-After": "60" } },
+    {
+      status: 429,
+      // no-store: /api/summarize kini GET yang di-cache CDN — penolakan ini
+      // tidak boleh ikut tersimpan dan disajikan ke user lain.
+      headers: { "Retry-After": "60", "Cache-Control": "no-store" },
+    },
   );
 }

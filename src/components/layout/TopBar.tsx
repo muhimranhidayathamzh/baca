@@ -18,10 +18,13 @@ export default function TopBar({ title, leading, trailing }: TopBarProps) {
     >
       <div className="flex min-w-0 items-center gap-2">
         {leading}
+        {/* <h1>, bukan <span>: pengguna pembaca layar bernavigasi lewat
+            heading, dan tanpa ini halaman tidak punya judul yang bisa
+            ditemukan (audit axe: page-has-heading-one). */}
         {title && (
-          <span className="truncate font-grotesk text-sm font-semibold tracking-wide text-on-d">
+          <h1 className="truncate font-grotesk text-sm font-semibold tracking-wide text-on-d">
             {title}
-          </span>
+          </h1>
         )}
       </div>
       <div className="flex shrink-0 items-center gap-2">{trailing}</div>

@@ -1,11 +1,12 @@
 "use client";
 
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 import { Bookmark, Share2 } from "lucide-react";
+import HookText from "@/components/ui/HookText";
 import { HookShimmer } from "@/components/ui/Shimmer";
 import { useToast } from "@/components/ui/Toast";
 import { sharePaper, shareToastMessage } from "@/lib/share";
-import { TOPIC_DOT_COLOR, formatCardMeta, underlineVariant } from "@/lib/topics";
+import { TOPIC_DOT_COLOR, formatCardMeta } from "@/lib/topics";
 import type { SummaryState } from "@/hooks/useViewportSummarize";
 import type { Paper } from "@/types";
 
@@ -20,28 +21,6 @@ interface PaperCardProps {
 /** Spring standar app — tidak pernah ease linear (SPEC.md Bagian 3). */
 const SPRING = { type: "spring", damping: 25, stiffness: 300 } as const;
 
-/**
- * Render hook dengan garis bawah amber di frasa kunci.
- *
- * `key` dijamin substring persis dari hook oleh lib/summarize.ts, tapi tetap
- * dicek lagi di sini — kalau tidak ketemu, hook ditampilkan polos. Garis bawah
- * di posisi salah lebih merusak daripada tidak ada garis bawah sama sekali.
- */
-function HookText({ hook, keyPhrase, paperId }: { hook: string; keyPhrase: string | null; paperId: string }) {
-  if (!keyPhrase) return <>{hook}</>;
-
-  const index = hook.indexOf(keyPhrase);
-  if (index === -1) return <>{hook}</>;
-
-  return (
-    <>
-      {hook.slice(0, index)}
-      <span className={underlineVariant(paperId)}>{keyPhrase}</span>
-      {hook.slice(index + keyPhrase.length)}
-    </>
-  );
-}
-
 export default function PaperCard({
   paper,
   state,
@@ -53,6 +32,9 @@ export default function PaperCard({
 
   const isReady = state?.status === "done";
   const summary = isReady ? state.summary : null;
+  // Fallback (AI gagal / jatah habis / tanpa abstrak) memakai judul asli
+  // sebagai hook — itu bukan hook sungguhan.
+  const isFallback = Boolean(summary && summary.hook === paper.title);
 
   async function handleShare(event: React.MouseEvent) {
     event.stopPropagation();
@@ -68,7 +50,7 @@ export default function PaperCard({
   }
 
   return (
-    <motion.article
+    <m.article
       layout
       whileTap={{ scale: 0.985 }}
       transition={SPRING}
@@ -97,7 +79,7 @@ export default function PaperCard({
       <div className="relative min-h-[3.4rem]">
         <AnimatePresence initial={false}>
           {!isReady && (
-            <motion.div
+            <m.div
               key="shimmer"
               className="absolute inset-x-0 top-0"
               initial={{ opacity: 1 }}
@@ -105,30 +87,39 @@ export default function PaperCard({
               transition={{ duration: 0.3 }}
             >
               <HookShimmer />
-            </motion.div>
+            </m.div>
           )}
         </AnimatePresence>
 
         {isReady && (
-          <motion.h2
+          <m.h2
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.3 }}
-            className="font-grotesk text-[19px] font-medium leading-snug tracking-[-0.01em] text-on-d"
+            className={`font-grotesk text-[19px] font-medium leading-snug tracking-[-0.01em] text-on-d ${
+              isFallback ? "line-clamp-3" : ""
+            }`}
           >
             <HookText
               hook={summary!.hook}
               keyPhrase={summary!.key}
               paperId={paper.id}
             />
-          </motion.h2>
+          </m.h2>
         )}
       </div>
 
-      {/* Judul asli paper — italic serif, selalu tampil (tidak menunggu AI) */}
-      <p className="mt-2.5 line-clamp-2 font-serif-read text-[13.5px] italic leading-relaxed text-on-d2">
-        {paper.title}
-      </p>
+      {/*
+        Judul asli paper — italic serif, tampil sejak awal tanpa menunggu AI.
+        Disembunyikan saat ringkasan fallback: di kondisi itu "hook"-nya adalah
+        judul asli itu sendiri, dan kartu akan menampilkan judul yang sama dua
+        kali berturut-turut.
+      */}
+      {!isFallback && (
+        <p className="mt-2.5 line-clamp-2 font-serif-read text-[13.5px] italic leading-relaxed text-on-d2">
+          {paper.title}
+        </p>
+      )}
 
       <div className="mt-3.5 flex items-center justify-between gap-3">
         <span className="min-w-0 truncate font-ui text-[12px] text-on-d3">
@@ -143,7 +134,7 @@ export default function PaperCard({
             aria-pressed={isSaved}
             className="text-on-d3 transition-colors hover:text-on-d2"
           >
-            <motion.span
+            <m.span
               className="block"
               animate={{ scale: isSaved ? 1.12 : 1 }}
               transition={SPRING}
@@ -153,7 +144,7 @@ export default function PaperCard({
                 strokeWidth={1.75}
                 className={isSaved ? "fill-amber text-amber" : ""}
               />
-            </motion.span>
+            </m.span>
           </button>
 
           <button
@@ -166,6 +157,6 @@ export default function PaperCard({
           </button>
         </div>
       </div>
-    </motion.article>
+    </m.article>
   );
 }

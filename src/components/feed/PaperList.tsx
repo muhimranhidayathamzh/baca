@@ -34,7 +34,7 @@ export default function PaperList({
   const handleOpened = useCallback(
     (paper: Paper) => {
       markAsRead(paper.id);
-      trackPaperOpened(paper.id, paper.topic);
+      trackPaperOpened();
     },
     [markAsRead],
   );

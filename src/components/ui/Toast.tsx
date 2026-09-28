@@ -1,6 +1,6 @@
 "use client";
 
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 import {
   createContext,
   useCallback,
@@ -59,7 +59,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       >
         <AnimatePresence>
           {toast && (
-            <motion.div
+            <m.div
               key={toast.id}
               initial={{ opacity: 0, y: 12, scale: 0.96 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -68,7 +68,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               className="max-w-full truncate rounded-full border border-desk-line bg-desk-3 px-4 py-2.5 font-ui text-[13px] text-on-d shadow-lg"
             >
               {toast.message}
-            </motion.div>
+            </m.div>
           )}
         </AnimatePresence>
       </div>

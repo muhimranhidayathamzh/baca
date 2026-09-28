@@ -19,6 +19,15 @@ const nextConfig: NextConfig = {
   // menolak start begitu melihat ADA `webpack()` custom, sebelum sempat tahu
   // isinya no-op. `turbopack: {}` eksplisit menghilangkan pengecekan itu.
   turbopack: {},
+
+  experimental: {
+    // CSS disisipkan langsung di <head>, bukan <link> terpisah yang memblokir
+    // render. Audit Lighthouse mengukur dua file CSS ini menunda render ~950 ms
+    // di jaringan mobile. Aman karena seluruh CSS app hanya ~8 KB (Tailwind
+    // hanya menghasilkan class yang dipakai). Trade-off-nya: CSS tidak di-cache
+    // terpisah — tapi HTML-nya sendiri sudah di-cache service worker PWA.
+    inlineCss: true,
+  },
 };
 
 export default withSerwist(nextConfig);

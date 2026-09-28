@@ -1,4 +1,5 @@
-import { GoogleGenAI } from "@google/genai";
+import "server-only";
+import { GoogleGenAI, ThinkingLevel, type ThinkingConfig } from "@google/genai";
 import type { Summary } from "@/types";
 
 /**
@@ -10,17 +11,39 @@ import type { Summary } from "@/types";
  */
 
 /**
- * Nama model dibuat bisa diatur lewat env supaya tidak perlu ubah kode saat
- * Google memensiunkan sebuah versi. SPEC awalnya menyebut model preview
- * `gemini-2.5-flash-preview-05-20`; default di sini memakai nama Flash stabil
- * yang tidak terikat tanggal.
+ * Nama model bisa diatur lewat env supaya tidak perlu ubah kode saat Google
+ * memensiunkan sebuah versi.
+ *
+ * Default `gemini-3.5-flash-lite`: per September 2026 Google membatasi akses
+ * model 2.5 hanya untuk akun yang pernah memakainya, jadi API key baru akan
+ * ditolak. Flash-Lite dipilih karena tugasnya sederhana (abstrak pendek →
+ * JSON) dan kecepatan penting — kartu menampilkan shimmer selama menunggu.
  */
-const DEFAULT_MODEL = "gemini-2.5-flash";
+const DEFAULT_MODEL = "gemini-3.5-flash-lite";
 
 /** Batas panjang abstrak yang dikirim ke model (SPEC.md Bagian 5). */
 const MAX_ABSTRACT_CHARS = 1500;
 
-const MAX_OUTPUT_TOKENS = 1000;
+/**
+ * Token "thinking" pada model Gemini 3.x ikut dihitung ke batas ini sebagai
+ * batas keras. Output JSON-nya sendiri hanya ~300 token, tapi dengan batas
+ * 1000 seperti draft awal SPEC, pemikiran yang panjang bisa memotong JSON di
+ * tengah jalan dan memaksa fallback. 2048 memberi ruang aman.
+ */
+const MAX_OUTPUT_TOKENS = 2048;
+
+/**
+ * Tingkat thinking terendah yang diizinkan tiap keluarga model. Thinking tidak
+ * bisa dimatikan sepenuhnya di 3.x, dan nilai yang tidak didukung membuat API
+ * menolak request — mis. "minimal" hanya sah untuk Flash-Lite, sementara
+ * Flash biasa minimal "low".
+ */
+function thinkingConfigFor(model: string): ThinkingConfig | undefined {
+  if (model.startsWith("gemini-2")) return { thinkingBudget: 0 };
+  if (model.includes("lite")) return { thinkingLevel: ThinkingLevel.MINIMAL };
+  if (model.startsWith("gemini-3")) return { thinkingLevel: ThinkingLevel.LOW };
+  return undefined;
+}
 
 /** Prompt persis seperti SPEC.md Bagian 5. */
 function buildPrompt(title: string, abstract: string): string {
@@ -142,6 +165,7 @@ async function callGemini(prompt: string): Promise<string | null> {
       // memintanya lewat prompt.
       responseMimeType: "application/json",
       temperature: 0.7,
+      thinkingConfig: thinkingConfigFor(model),
     },
   });
 

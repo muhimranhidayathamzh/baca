@@ -15,7 +15,7 @@ interface TopicChipsProps {
  */
 export default function TopicChips({ topics, active, onChange }: TopicChipsProps) {
   return (
-    <div className="scrollbar-none flex gap-2 overflow-x-auto px-4 pb-3">
+    <div className="scrollbar-none flex gap-2 overflow-x-auto px-4 pb-3 pt-3">
       {topics.map((topic) => {
         const isActive = topic === active;
         return (

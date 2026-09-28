@@ -9,8 +9,8 @@ dokumen itu adalah sumber kebenaran untuk semua keputusan di proyek ini.
 
 ## Stack
 
-Next.js 14 (App Router) · Tailwind CSS · Framer Motion · Supabase · Gemini API ·
-OpenAlex API · Vercel
+Next.js 16 (App Router) · Tailwind CSS v4 · Framer Motion · Upstash Redis ·
+Gemini API · OpenAlex API · Vercel
 
 ## Setup
 
@@ -29,11 +29,12 @@ masing-masing key ada di `docs/SPEC.md` Bagian 8.
 cp .env.example .env.local
 ```
 
-### 3. Setup Supabase
-Jalankan SQL schema dari `docs/SPEC.md` Bagian 2 (Database Schema) di SQL Editor
-project Supabase kamu.
+Untuk dev lokal, semua key boleh kosong dulu: feed dan search tetap jalan
+(OpenAlex tanpa key, rate limit in-memory), hanya ringkasan AI yang jatuh ke
+fallback sampai `GEMINI_API_KEY` diisi. Di produksi, kredensial Upstash **wajib**
+— tanpanya semua API route sengaja membalas 429 (lihat `docs/SPEC.md` Bagian 11).
 
-### 4. Jalankan dev server
+### 3. Jalankan dev server
 ```bash
 npm run dev
 ```
@@ -54,7 +55,10 @@ baca/
 ## Deploy
 
 Project ini dikonfigurasi untuk deploy ke Vercel. Hubungkan repo GitHub ke Vercel,
-isi environment variables yang sama seperti `.env.local`, lalu deploy.
+isi environment variables yang sama seperti `.env.local`, lalu deploy. Build
+command biarkan default — `npm run build` sudah memakai `--webpack`, yang wajib
+supaya service worker PWA ter-bundle. Checklist lengkap ada di `docs/SPEC.md`
+Bagian 11.
 
 > **Catatan lisensi:** Vercel Hobby plan ditujukan untuk penggunaan non-komersial.
 > Kalau proyek ini mulai dipublikasikan secara komersial, pertimbangkan upgrade

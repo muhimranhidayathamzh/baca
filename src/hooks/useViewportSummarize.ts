@@ -40,13 +40,9 @@ export function useViewportSummarize() {
 
   const runSummarize = useCallback(async (paperId: string) => {
     try {
-      const response = await fetch("/api/summarize", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // Hanya paper_id yang dikirim — server mengambil abstraknya sendiri
-        // (SPEC.md Bagian 2).
-        body: JSON.stringify({ paper_id: paperId }),
-      });
+      // Hanya paper_id yang dikirim — server mengambil abstraknya sendiri
+      // (SPEC.md Bagian 2). GET supaya ringkasan bisa dilayani cache CDN.
+      const response = await fetch(`/api/summarize?paper_id=${encodeURIComponent(paperId)}`);
 
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const summary = (await response.json()) as Summary;

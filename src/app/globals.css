@@ -56,3 +56,71 @@ body {
 .underline-amber-3 {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 12' preserveAspectRatio='none'%3E%3Cpath d='M1 9C12 4 30 4.5 45 8.5C62 12.5 80 3.5 99 7.5' fill='none' stroke='%23D9A04E' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E");
 }
+
+/* ---------------------------------------------------------------------- */
+/* Animasi masuk CSS murni — untuk elemen di atas lipatan yang harus       */
+/* tampil sebelum JS selesai dimuat (lihat onboarding/page.tsx).           */
+/*                                                                         */
+/* SPEC Bagian 3 meminta spring physics, dan CSS tidak punya spring asli.  */
+/* Kurva di bawah adalah perlambatan tajam ala sheet iOS — terasa fisik,   */
+/* bukan linear/ease-in-out. Durasi dijaga <= 400ms sesuai SPEC.           */
+/* Animasi setelah interaksi user tetap memakai spring Framer Motion.      */
+/* ---------------------------------------------------------------------- */
+@keyframes baca-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes baca-underline-draw {
+  from {
+    background-size: 0% 0.5em;
+  }
+  to {
+    background-size: 100% 0.5em;
+  }
+}
+
+.enter-fade-up {
+  animation: baca-fade-up 380ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+.enter-delay-2 {
+  animation-delay: 160ms;
+}
+
+/* Garis bawah digores masuk seperti pulpen, SETELAH teksnya sudah terbaca. */
+.underline-draw {
+  animation: baca-underline-draw 400ms cubic-bezier(0.32, 0.72, 0, 1) 280ms both;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Pendar lampu baca — "glow ambient minimal" di checklist anti-AI-slop.   */
+/* Warnanya diturunkan dari token amber, bukan warna baru. Sama dengan     */
+/* pendar di ikon app, jadi layar pertama menyambung dengan ikon homescreen.*/
+/* ---------------------------------------------------------------------- */
+.lamp-glow {
+  position: absolute;
+  inset-inline: -30%;
+  bottom: -28%;
+  height: 70%;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at 50% 100%,
+    color-mix(in srgb, var(--color-amber) 24%, transparent) 0%,
+    color-mix(in srgb, var(--color-amber) 8%, transparent) 45%,
+    transparent 72%
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .enter-fade-up,
+  .underline-draw {
+    animation: none;
+  }
+}

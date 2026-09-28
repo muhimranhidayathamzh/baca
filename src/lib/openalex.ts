@@ -1,6 +1,10 @@
+import "server-only";
 import { abstractFromInverted, estimateReadingMinutes, type InvertedIndex } from "./abstract";
 import { rerankBalanced } from "./rerank";
+import { TOPIC_TO_FIELD } from "./topics";
 import type { FeedMode, Paper, TopicName } from "@/types";
+
+export { TOPICS, isTopicName } from "./topics";
 
 const OPENALEX_BASE = "https://api.openalex.org";
 
@@ -25,28 +29,9 @@ const CANDIDATE_SIZE = 25;
 /** Batas maksimum `sample` OpenAlex — terverifikasi live (>10.000 ditolak). */
 const MAX_SAMPLE = 10_000;
 
-/**
- * Pemetaan topik Indonesia → field OpenAlex (SPEC.md Bagian 6).
- * ID diverifikasi terhadap endpoint /fields yang live.
- */
-const TOPIC_TO_FIELD: Record<TopicName, string> = {
-  Kesehatan: "fields/27", // Medicine
-  AI: "fields/17", // Computer Science
-  Neurosains: "fields/28", // Neuroscience
-  Lingkungan: "fields/23", // Environmental Science
-  Psikologi: "fields/32", // Psychology
-  Ekonomi: "fields/20", // Economics, Econometrics and Finance
-};
-
 const FIELD_TO_TOPIC: Record<string, TopicName> = Object.fromEntries(
   Object.entries(TOPIC_TO_FIELD).map(([topic, field]) => [field, topic as TopicName]),
 ) as Record<string, TopicName>;
-
-export const TOPICS = Object.keys(TOPIC_TO_FIELD) as TopicName[];
-
-export function isTopicName(value: string): value is TopicName {
-  return value in TOPIC_TO_FIELD;
-}
 
 /** Field yang diminta dari OpenAlex. Membatasi payload = respons lebih cepat. */
 const FEED_SELECT = [
@@ -94,7 +79,7 @@ export class OpenAlexError extends Error {
 
 /**
  * Ubah OpenAlex work ID jadi bentuk pendek: "https://openalex.org/W123" → "W123".
- * Dipakai konsisten sebagai paper_id di seluruh app (localStorage, Supabase).
+ * Dipakai konsisten sebagai paper_id di seluruh app (localStorage, cache Redis).
  */
 export function shortWorkId(id: string): string {
   return id.replace(/^https?:\/\/openalex\.org\//i, "").trim();
@@ -183,7 +168,7 @@ function normalizeWork(work: OpenAlexWork): Paper | null {
  * bocor ke feed (terverifikasi live — top-6 Medicine memunculkan paper IoT
  * lalu lintas kota). `primary_topic` jauh lebih presisi.
  */
-function buildFilter(topic: TopicName | null): string {
+function buildFilter(topic: TopicName | null, { forFeed }: { forFeed: boolean }): string {
   const parts = [
     `publication_year:>${MIN_PUBLICATION_YEAR - 1}`,
     "is_oa:true",
@@ -193,6 +178,17 @@ function buildFilter(topic: TopicName | null): string {
     "has_abstract:true",
   ];
   if (topic) parts.unshift(`primary_topic.field.id:${TOPIC_TO_FIELD[topic]}`);
+
+  // Buang record korup dari FEED. Feed diurut sitasi, jadi record rusak
+  // dengan sitasi melambung langsung naik ke puncak — terverifikasi live:
+  // paper arkeologi Zaman Batu muncul di urutan kedua feed Kesehatan dengan
+  // 24.109 sitasi tapi 0 referensi, tanda record yang tergabung/korup. Artikel
+  // riset sungguhan hampir tidak pernah tanpa daftar pustaka.
+  //
+  // Sengaja TIDAK dipakai di search: banyak jurnal lokal Indonesia terindeks
+  // tanpa referensi yang ter-parse, dan filter ini akan membuang mereka.
+  if (forFeed) parts.push("referenced_works_count:>0");
+
   return parts.join(",");
 }
 
@@ -226,7 +222,7 @@ export interface FeedResult {
  */
 export async function fetchFeed(params: FeedParams): Promise<FeedResult> {
   const { topic, mode, exclude = [], cursor } = params;
-  const filter = buildFilter(topic);
+  const filter = buildFilter(topic, { forFeed: true });
   const excluded = new Set(exclude);
 
   if (mode === "explore") {
@@ -297,7 +293,7 @@ export async function searchPapers(query: string, page = 1): Promise<SearchResul
   const data = await fetchOpenAlex(
     buildUrl("/works", {
       search: query,
-      filter: buildFilter(null),
+      filter: buildFilter(null, { forFeed: false }),
       select: FEED_SELECT,
       page: safePage,
       "per-page": PAGE_SIZE,

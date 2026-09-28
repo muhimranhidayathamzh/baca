@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Analytics } from "@vercel/analytics/next";
+import Script from "next/script";
 import AppShell from "@/components/layout/AppShell";
+import { FEED_PRELOAD_SCRIPT } from "@/lib/feed-preload";
 import { fontVariables } from "@/lib/fonts";
 import "./globals.css";
 
@@ -36,6 +38,17 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="id" className={`${fontVariables} h-full`}>
       <body className="antialiased">
+        {/*
+          Preload /api/feed saat HTML diparse (lihat lib/feed-preload.ts).
+          `beforeInteractive` hanya ada di HTML awal dan tidak pernah
+          di-render ulang saat navigasi client — tag <script> biasa di dalam
+          komponen memicu error React ketika dirender di browser.
+        */}
+        <Script
+          id="feed-preload"
+          strategy="beforeInteractive"
+          dangerouslySetInnerHTML={{ __html: FEED_PRELOAD_SCRIPT }}
+        />
         <AppShell>{children}</AppShell>
         {/* Tanpa cookie; hanya aktif di produksi Vercel (SPEC.md langkah 29). */}
         <Analytics />

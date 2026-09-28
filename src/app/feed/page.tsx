@@ -13,7 +13,7 @@ import { useFeed } from "@/hooks/useFeed";
 import { STORAGE_KEYS, useIsHydrated, useLocalStorage } from "@/hooks/useLocalStorage";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { useReadHistory } from "@/hooks/usePaperCollections";
-import { TOPICS } from "@/lib/openalex";
+import { TOPICS } from "@/lib/topics";
 import type { FeedMode, TopicName } from "@/types";
 
 /** Identitas stabil supaya snapshot localStorage tidak berubah tiap render. */

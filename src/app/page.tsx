@@ -1,6 +1,5 @@
 "use client";
 
-import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { STORAGE_KEYS, useIsHydrated, useLocalStorage } from "@/hooks/useLocalStorage";
@@ -26,14 +25,11 @@ export default function Home() {
 
   return (
     <main className="flex flex-1 items-center justify-center">
-      <motion.h1
-        className="font-grotesk text-[40px] font-medium tracking-[-0.03em] text-on-d"
-        initial={{ opacity: 0, scale: 0.96 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ type: "spring", damping: 25, stiffness: 300 }}
-      >
+      {/* CSS murni, bukan Framer Motion: logo ini elemen LCP layar splash dan
+          tidak boleh menunggu JS dimuat dulu sebelum terlihat. */}
+      <h1 className="enter-fade-up font-grotesk text-[40px] font-medium tracking-[-0.03em] text-on-d">
         baca<span className="text-amber">.</span>
-      </motion.h1>
+      </h1>
     </main>
   );
 }

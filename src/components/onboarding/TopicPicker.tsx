@@ -1,8 +1,7 @@
 "use client";
 
-import { motion } from "framer-motion";
-import { TOPIC_DOT_COLOR } from "@/lib/topics";
-import { TOPICS } from "@/lib/openalex";
+import { m } from "framer-motion";
+import { TOPICS, TOPIC_DOT_COLOR } from "@/lib/topics";
 import type { TopicName } from "@/types";
 
 /**
@@ -48,7 +47,7 @@ export default function TopicPicker({
               dipilih. Bahasa visualnya sama dengan titik di kartu feed, jadi
               user sudah mengenalinya sebelum melihat kartu pertama.
             */}
-            <motion.span
+            <m.span
               className="mb-2.5 block rounded-full"
               style={{ backgroundColor: TOPIC_DOT_COLOR[topic] }}
               animate={{

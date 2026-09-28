@@ -23,11 +23,33 @@
 | Styling     | Tailwind CSS + CSS custom           | Tailwind untuk layout/spacing, CSS custom untuk signature elements (noise grain, amber underlines, transisi gelap→terang) — jangan paksa semua ke utility classes |
 | Animasi     | Framer Motion                       | Transisi gelap→terang adalah IDENTITAS app — harus mulus dan presisi, bukan CSS transition biasa. Framer Motion kasih gesture support (swipe), layout animations, dan AnimatePresence untuk mount/unmount |
 | PWA         | @serwist/next                       | Service worker + cache strategy terintegrasi Next.js |
-| Database    | Supabase (PostgreSQL, free tier)    | Cache summary lintas user, siap buat auth di v1.1 |
-| AI          | Google Gemini API (free tier)        | Summarization Bahasa Indonesia — 1.500 req/hari gratis, tanpa kartu kredit. Arsitektur provider-agnostic: bisa swap ke Claude API nanti tanpa ubah struktur app |
+| Penyimpanan server | Upstash Redis (free tier)    | Satu layanan untuk rate limiting, cache ringkasan lintas user, batas harian AI, dan metrik anonim. Lihat "Audit arsitektur" di bawah |
+| Cache edge  | CDN Vercel                          | Ringkasan yang sama dilayani edge tanpa memanggil fungsi, Redis, atau AI |
+| AI          | Google Gemini API (free tier), default `gemini-3.5-flash-lite` | Summarization Bahasa Indonesia. Arsitektur provider-agnostic: bisa swap ke Claude API nanti tanpa ubah struktur app |
 | Data        | OpenAlex API                        | 250M+ works, gratis, metadata kaya |
 | Deployment  | Vercel (hobby plan, gratis)         | Zero-config untuk Next.js, edge functions, analytics |
+| Analytics   | Vercel Web Analytics (pageview) + penghitung anonim sendiri di Upstash | Custom event Vercel tidak tersedia di Hobby |
 | Repo        | GitHub                              | CI/CD via Vercel GitHub integration |
+
+> **Audit arsitektur (28 September 2026).** Sebelum deploy, stack diaudit
+> terhadap dokumentasi resmi terkini. Empat keputusan draft awal ternyata
+> tidak bertahan, dan diganti dengan persetujuan pemilik proyek:
+>
+> 1. **Supabase dihapus.** Supabase Free menghentikan project otomatis setelah
+>    7 hari tanpa aktivitas — saat MVP masih sepi, cache akan diam-diam mati.
+>    Cache pindah ke Upstash Redis yang memang sudah ada untuk rate limiting:
+>    satu akun dan dua env var lebih sedikit, tanpa auto-pause. Kalau v1.1
+>    butuh auth, Supabase bisa ditambahkan lagi saat itu (bukan sebelumnya).
+> 2. **`/api/summarize` jadi GET yang di-cache CDN** (sebelumnya POST). Aturan
+>    keamanannya tidak berubah — tetap hanya `paper_id`. Ringkasan satu paper
+>    sama untuk semua orang, jadi edge Vercel bisa melayaninya berulang kali
+>    tanpa biaya. Ini juga menghemat kuota perintah Upstash free (500 ribu/bulan).
+> 3. **Model default `gemini-3.5-flash-lite`**, bukan `gemini-2.5-flash`. Google
+>    kini membatasi akses model 2.5 hanya untuk akun yang pernah memakainya —
+>    API key baru akan ditolak dan semua kartu jatuh ke fallback.
+> 4. **Custom event Vercel Analytics tidak tersedia di plan Hobby** (tabel harga
+>    Vercel: "Custom Events: –" untuk Hobby). Dua metrik utama langkah 29 kini
+>    dihitung sendiri di Upstash (lihat `/api/event` dan `/api/stats`).
 
 ### Standar Kualitas (non-negotiable)
 - **Lighthouse Performance > 90** di mobile — app ini harus cepat di koneksi Indonesia
@@ -35,6 +57,40 @@
 - **First Contentful Paint < 1.5s** — feed harus muncul cepat, shimmer boleh, tapi jangan blank screen lama
 - **Cumulative Layout Shift < 0.1** — kartu nggak boleh loncat saat summary masuk
 - **Summary AI harus grounded** — kalau abstrak nggak mendukung klaim, summary nggak boleh nambah. Lebih baik kurang info daripada salah info
+
+> **Hasil ukur terakhir (build produksi, Lighthouse mobile dengan throttling
+> nyata — CPU 4× lebih lambat + 4G lambat, 28 September 2026):**
+>
+> | Halaman | Performance | Aksesibilitas | FCP | LCP | CLS |
+> |---|---|---|---|---|---|
+> | /onboarding | 97–99 | 100 | 0,9 s | 0,9 s | 0 |
+> | /feed | 92 | 100 | 1,0 s | 3,1 s | 0 |
+> | /search | 98–99 | 100 | 1,0 s | 1,0 s | 0 |
+> | /profile | 98–100 | 100 | 1,0 s | 1,0 s | 0 |
+>
+> CLS saat ringkasan AI masuk: **0,000** di jalur normal (hook ≤12 kata pas di
+> slot dua baris yang dipesan), 0,054 di jalur fallback.
+>
+> **Soal metode ukur.** Metode default Lighthouse ("simulated") memberi angka
+> lebih rendah (84–87) *di localhost*, karena HTML tiba dalam ~20 ms dan JS
+> tiba sebelum paint pertama — simulasinya lalu menganggap seluruh JS sebagai
+> penghalang LCP, padahal LCP yang teramati hanya 260 ms. Localhost juga
+> memakai HTTP/1.1 (maks 6 koneksi), sedangkan Vercel memakai HTTP/2. Angka
+> yang mengikat adalah **PageSpeed Insights terhadap URL produksi** setelah
+> deploy — ada di checklist Bagian 11.
+>
+> **Yang memperbaiki skor dari 87–88** (audit awal): (1) elemen LCP onboarding
+> tidak lagi disembunyikan animasi masuk berbasis JS — Framer Motion me-render
+> `opacity: 0` di HTML server, sehingga teks baru terlihat setelah JS dimuat;
+> (2) Framer Motion dimuat lewat `LazyMotion` + komponen `m`, fiturnya diunduh
+> asinkron (sebelumnya ~520 ms waktu boot di CPU mobile); (3) CSS di-inline ke
+> `<head>` (`experimental.inlineCss`); (4) `/api/feed` di-preload saat HTML
+> diparse (`lib/feed-preload.ts`) — sebelumnya baru dimulai setelah hydrate,
+> di detik ke-3.
+>
+> **Aturan turunan:** elemen di atas lipatan yang mungkin jadi LCP TIDAK BOLEH
+> memakai animasi masuk Framer Motion (`initial={{ opacity: 0 }}`). Pakai CSS
+> murni (`.enter-fade-up` di globals.css) yang jalan sejak paint pertama.
 
 ### Arsitektur Alur Data
 ```
@@ -46,27 +102,33 @@
     │       ├── Re-rank seimbang (60% recency + 40% citations)
     │       └── Return paper list ke client
     │
-    ├── POST /api/summarize
+    ├── GET /api/summarize?paper_id=W123
     │       │
-    │       ├── Cek cache di Supabase (paper_id)
+    │       ├── [CDN Vercel] ringkasan sudah pernah dibuat? → langsung dari edge
+    │       ├── Cek cache Redis (paper_id)
     │       ├── Kalau ada → return cached summary
-    │       ├── Kalau belum → panggil Gemini API
+    │       ├── Kalau belum → cek jatah AI harian global
+    │       │       └── Habis → fallback (tidak di-cache)
+    │       ├── Panggil Gemini API
     │       │       ├── Generate: hook, key, quick (3), deep
     │       │       └── Semua dalam Bahasa Indonesia
-    │       ├── Simpan hasil ke Supabase
-    │       └── Return summary ke client
+    │       ├── Simpan hasil ke Redis (180 hari)
+    │       └── Return summary + Cache-Control untuk CDN
     │
-    └── GET /api/search?q=keyword
-            │
-            ├── Fetch dari OpenAlex search endpoint
-            └── Return hasil ke client
+    ├── GET /api/search?q=keyword
+    │       │
+    │       ├── Fetch dari OpenAlex search endpoint
+    │       └── Return hasil ke client
+    │
+    └── POST /api/event  (metrik anonim, lewat sendBeacon)
 ```
 
 ### API Routes (Next.js)
 
 **`GET /api/feed`**
 - Query params: `topic` (string), `mode` ("fokus" | "explore"), `cursor` (string, opsional), `exclude` (string, opsional — comma-separated paper_id dari read_history client)
-- Fokus: filter 2022+, is_oa:true, type:article, has_abstract:true, sort cited_by_count:desc, re-rank balanced
+- Fokus: filter 2022+, is_oa:true, type:article, has_abstract:true, referenced_works_count:>0, sort cited_by_count:desc, re-rank balanced
+  (filter `referenced_works_count:>0` hanya untuk feed, bukan search — lihat Bagian 6)
 - Explore: filter sama, tapi pakai `sample=` + random seed (parameter `seed` dikirim balik ke client)
 - Paper yang ada di `exclude` dibuang dari hasil (mencegah feed ngulang paper yang sama).
   Dibatasi 100 id terakhir supaya URL tidak meledak seiring read_history tumbuh
@@ -79,25 +141,46 @@
 - Abstrak **tidak pernah** ikut dikirim ke client — hanya dipakai server-side di
   `/api/summarize`
 
-**`POST /api/summarize`**
-- Body: `{ paper_id }` SAJA — client TIDAK BOLEH kirim abstrak (mencegah endpoint dibajak jadi proxy Claude)
+**`GET /api/summarize?paper_id=W123`**
+- Satu-satunya input: `paper_id`. Client TIDAK BOLEH kirim abstrak (mencegah endpoint dibajak jadi proxy AI). Parameter lain apa pun diabaikan; POST ditolak 405
 - Server fetch abstrak langsung dari OpenAlex berdasarkan paper_id
-- Cek Supabase `summaries` table dulu (cache hit → return langsung)
-- Kalau miss: panggil Gemini API dengan prompt terdefinisi (lihat Bagian 5)
+- Cek cache Redis dulu (cache hit → return langsung)
+- Kalau miss: cek jatah AI harian global (`AI_DAILY_LIMIT`, default 1000), lalu panggil Gemini API dengan prompt terdefinisi (lihat Bagian 5)
 - Rate limit: max 30 request/menit per IP (Upstash Ratelimit)
+- **Cache-Control:**
+  - Ringkasan sukses (dan fallback karena abstrak kosong, yang hasilnya tidak akan berubah): `public, max-age=86400, s-maxage=2592000, stale-while-revalidate=604800`
+  - Fallback karena AI gagal / jatah habis, semua error, dan 429: `no-store` — supaya permintaan berikutnya mencoba lagi, bukan menerima fallback basi 30 hari
 - Error handling:
   - Paper_id tidak ditemukan di OpenAlex → return 404 `{ error: "Paper not found" }`
-  - Abstrak kosong/null → return 200 dengan `{ hook: title, key: null, quick: ["Abstrak tidak tersedia."], deep: "Buka paper asli untuk membaca." }` (graceful fallback, JANGAN panggil Claude)
+  - Abstrak kosong/null → return 200 dengan `{ hook: title, key: null, quick: ["Abstrak tidak tersedia."], deep: "Buka paper asli untuk membaca." }` (graceful fallback, JANGAN panggil AI)
   - Gemini API return invalid JSON → retry 1x, kalau tetap gagal → return fallback seperti abstrak kosong + log error
   - Gemini API timeout/down → return fallback + log error
+  - Jatah AI harian habis → return fallback + log warning
   - Rate limit exceeded → return 429 `{ error: "Too many requests" }`
 - Return: `{ hook, key, quick[], deep }`
+
+> **Kenapa ada batas harian global.** Rate limit per-IP (30/menit) tidak
+> membatasi *total*: beberapa IP sudah cukup untuk menghabiskan kuota Gemini
+> harian bagi semua user, atau — di tier berbayar — memunculkan tagihan
+> kejutan. Hanya cache miss yang dihitung. `INCR` Redis bersifat atomik, jadi
+> instance serverless yang berjalan bersamaan tidak bisa sama-sama lolos.
 
 **`GET /api/search`**
 - Query params: `q` (string), `page` (number, opsional)
 - Proxy ke OpenAlex search
 - Rate limit: max 60 request/menit per IP
 - Return: array of paper objects + `nextPage`
+
+**`POST /api/event`**
+- Body: `{ event, device }` — `event` salah satu dari `paper_opened` / `original_paper_opened`, `device` UUID acak dari localStorage (`baca_device`)
+- Dikirim lewat `navigator.sendBeacon`, jadi tetap terkirim walau user pindah ke tab paper asli
+- Rate limit: max 120 request/menit per IP
+- Return: 204 (juga saat Redis gagal — metrik bukan alasan mengganggu user); 400 untuk input tak valid
+
+**`GET /api/stats`**
+- Header `Authorization: Bearer <STATS_TOKEN>`. Kalau `STATS_TOKEN` tidak diisi → 404 (endpoint berpura-pura tidak ada)
+- Token dibandingkan waktu-konstan (`timingSafeEqual`); rate limit 10/menit per IP
+- Return: 4 minggu ISO terakhir — `papersOpened`, `originalOpened`, `readers`, `originalOpeners`, `percentReachingOriginal` (metrik 1), `papersPerReader` (metrik 2)
 
 ### Rate limiting (`lib/ratelimit.ts`)
 Produksi memakai Upstash Redis supaya hitungan konsisten lintas instance
@@ -106,27 +189,28 @@ supaya `npm run dev` tetap bisa jalan. Di produksi, env Upstash yang kosong
 atau Upstash yang tidak bisa dihubungi membuat request **ditolak** (fail
 closed) — bukan diloloskan tanpa proteksi.
 
-### Database Schema (Supabase)
+### Skema kunci Redis (Upstash)
 
-```sql
--- Cache summary AI (benefit semua user)
-CREATE TABLE summaries (
-    paper_id TEXT PRIMARY KEY,        -- OpenAlex work ID
-    title TEXT NOT NULL,
-    hook TEXT NOT NULL,                -- Pertanyaan hook dalam Bahasa Indonesia
-    key_phrase TEXT,                   -- Frasa untuk di-underline
-    quick JSONB NOT NULL,             -- Array of 3 strings
-    deep TEXT NOT NULL,               -- 2-3 kalimat rangkuman
-    original_abstract TEXT,
-    created_at TIMESTAMPTZ DEFAULT now()
-);
+Menggantikan tabel Supabase `summaries` (lihat "Audit arsitektur" di atas).
+Semua kunci berawalan `baca:` supaya database bisa dipakai bersama.
 
--- Index untuk lookup cepat
-CREATE INDEX idx_summaries_created ON summaries(created_at DESC);
+```
+baca:summary:<paper_id>              JSON { hook, key, quick[], deep }   TTL 180 hari
+baca:ai-budget:<YYYY-MM-DD>          angka (INCR)                         TTL 48 jam
+baca:m:count:<event>:<YYYY-MM-DD>    angka (INCR)                         TTL 120 hari
+baca:m:wcount:<event>:<YYYY-Www>     angka (INCR)                         TTL 120 hari
+baca:m:devices:<event>:<YYYY-Www>    HyperLogLog (PFADD) perangkat unik   TTL 120 hari
+baca:<limit>:*                       dikelola @upstash/ratelimit
 ```
 
-> Tabel user_preferences dan saved_papers belum diperlukan di MVP.
-> Preferensi dan bookmark disimpan di localStorage browser.
+> TTL 180 hari untuk ringkasan menjaga penyimpanan di bawah 256 MB free tier
+> (~1,5 KB per ringkasan ≈ 170 ribu paper). Abstrak asli tidak ikut disimpan —
+> tidak dipakai lagi setelah ringkasan jadi.
+>
+> Perangkat unik dihitung dengan HyperLogLog, yang hanya menyimpan perkiraan
+> jumlah — ID perangkat aslinya tidak bisa dibaca kembali dari Redis.
+>
+> Preferensi dan bookmark tetap di localStorage browser (tidak ada akun di MVP).
 
 ### localStorage Keys (MVP)
 ```
@@ -136,7 +220,11 @@ baca_mode            : string    — "fokus" | "explore"
 baca_saved           : object[]  — array paper yang di-bookmark
 baca_read_history    : string[]  — array paper_id yang sudah dibaca (maks 200)
 baca_active_topic    : string    — chip topik yang sedang aktif di feed
+baca_device          : string    — UUID acak untuk metrik anonim (terhapus oleh Reset)
 ```
+
+> Kunci-kunci ini didefinisikan di `lib/storage-keys.ts` (modul netral, bukan
+> `"use client"`), karena skrip preload feed dirakit di server component.
 
 > `baca_active_topic` ditambahkan saat Fase 3 (tidak ada di draft awal) supaya
 > pilihan chip user bertahan saat pindah halaman dan kembali lagi, bukan selalu
@@ -223,6 +311,15 @@ font-family: 'Inter', system-ui, sans-serif
 ### Signature Element
 Garis bawah amber organik di frasa kunci hook. Tiga varian SVG path yang di-assign random, biar nggak seragam. Kayak coretan pulpen — bukan garis lurus digital.
 
+> Varian dipilih dari hash id paper (bukan `Math.random()` tiap render), jadi
+> kartu dan headline reader untuk paper yang sama selalu memakai coretan yang
+> identik — coretannya "ikut terbawa" dari kartu ke halaman baca.
+>
+> **Pendar lampu** (checklist "glow ambient minimal"): layar Welcome punya
+> pendar amber lembut yang naik dari bawah, sama dengan pendar di ikon app —
+> layar pertama menyambung dengan ikon yang baru diketuk di homescreen.
+> Warnanya diturunkan dari token amber (`color-mix`), bukan warna baru.
+
 ### Transisi & Animasi (Framer Motion)
 Transisi gelap→terang (feed→reader) adalah momen paling penting secara UX.
 Harus dirasa FISIK — kayak narik halaman kertas ke bawah lampu baca.
@@ -247,7 +344,27 @@ JANGAN:
 - Ease-in-out linear di mana pun — selalu spring physics
 - Animasi lebih dari 400ms — harus kerasa responsive
 - Layout shift saat content berubah — gunakan AnimatePresence + layout prop
+- Animasi masuk berbasis JS (Framer Motion `initial={{ opacity: 0 }}`) pada
+  elemen di atas lipatan yang bisa jadi LCP — teksnya tersembunyi sampai JS
+  selesai dimuat
 ```
+
+> **Pengecualian CSS (audit Fase 5).** Animasi masuk untuk elemen di atas
+> lipatan yang tampil sebelum interaksi apa pun (logo & tagline Welcome, logo
+> splash) memakai CSS murni (`.enter-fade-up`, `.underline-draw` di
+> globals.css), karena harus jalan sejak paint pertama tanpa menunggu JS. CSS
+> tidak punya spring asli, jadi kurvanya perlambatan tajam
+> `cubic-bezier(0.32, 0.72, 0, 1)` — terasa fisik, bukan linear/ease-in-out —
+> dengan durasi ≤ 400 ms. Semua animasi setelah interaksi tetap spring Framer
+> Motion.
+>
+> Framer Motion dimuat lewat `LazyMotion` (mode `strict`) + komponen `m`, bukan
+> `motion`. Mode strict membuat build gagal kalau ada yang memakai `motion.`
+> lagi — mencegah bundle penuh diam-diam kembali.
+>
+> Setelan "kurangi gerakan" di sistem operasi dihormati: `MotionConfig
+> reducedMotion="user"` untuk Framer Motion, dan `prefers-reduced-motion` untuk
+> animasi CSS.
 
 ### Warna Topik (hanya titik kecil, bukan badge rame)
 ```
@@ -308,8 +425,17 @@ Ekonomi:    #C4884D
 
 ### 4.3 Reading View (imersif)
 - Slide up dari bawah (halaman terang naik ke meja gelap)
-- **Judul paper** (serif, besar)
+- **Headline = hook yang sama dengan kartu** (Space Grotesk, lengkap dengan garis bawah amber yang identik)
+- **Judul asli paper** tepat di bawahnya (serif italic)
 - **Meta** (author, sitasi, venue)
+
+> **Diubah saat audit Fase 5** (dengan persetujuan pemilik proyek). Draft awal
+> memakai judul paper sebagai headline. Di screenshot terlihat kontinuitasnya
+> putus: user mengetuk pertanyaan Bahasa Indonesia yang membuatnya penasaran,
+> lalu reader membuka dengan judul Inggris yang panjang dan hook-nya hilang.
+> Saat ringkasannya fallback (hook = judul asli) atau gagal, judul asli kembali
+> jadi headline serif — tidak ada judul yang tampil dua kali. Aturan yang sama
+> berlaku di kartu feed: di kondisi fallback, baris judul italic disembunyikan.
 - **Quick Take** (3 bullet, label: ⚡ Quick take · 30 detik)
 - **Deep Read** (expandable accordion, label: 📖 Deep read · X mnt)
 - **Tombol "Buka paper asli"** → link ke DOI atau OpenAlex
@@ -428,12 +554,22 @@ ABSTRAK: {abstract (maks 1500 karakter)}
 Jawab HANYA dalam format JSON valid. Tanpa markdown, tanpa backtick, tanpa penjelasan.
 ```
 
-Model: dikonfigurasi lewat env var **`GEMINI_MODEL`**, default `gemini-2.5-flash`.
-Draft awal spec menyebut `gemini-2.5-flash-preview-05-20`, tapi model preview
-terikat tanggal cepat dipensiunkan — nama model dijadikan konfigurasi supaya
-bisa diganti tanpa menyentuh kode.
+Model: dikonfigurasi lewat env var **`GEMINI_MODEL`**, default **`gemini-3.5-flash-lite`**.
+Riwayat: draft awal menyebut `gemini-2.5-flash-preview-05-20`, lalu Fase 2 memakai
+`gemini-2.5-flash`. Per September 2026 Google membatasi akses model 2.5 hanya
+untuk akun yang pernah memakainya, dan merekomendasikan 3.5 Flash-Lite atau
+3.8 Flash untuk proyek baru. Flash-Lite dipilih: tugasnya sederhana (abstrak
+pendek → JSON), ada free tier, dan kecepatan penting karena kartu menampilkan
+shimmer selama menunggu. `gemini-3.8-flash` bisa dipakai lewat env kalau ingin
+hook yang lebih luwes (lebih lambat, dan harganya naik 2× mulai Januari 2027).
 SDK: `@google/genai`
-Max tokens: 1000
+Max output tokens: **2048** (draft awal: 1000). Token *thinking* model Gemini 3.x
+ikut dihitung ke batas ini sebagai batas keras; output JSON-nya sendiri hanya
+~300 token, tapi dengan batas 1000 pemikiran yang panjang bisa memotong JSON di
+tengah jalan dan memaksa fallback.
+Thinking: tingkat terendah yang diizinkan tiap keluarga model — `MINIMAL` untuk
+Flash-Lite, `LOW` untuk Flash 3.x (thinking tidak bisa dimatikan penuh di 3.x,
+dan nilai yang tidak didukung membuat API menolak request).
 Output dipaksa JSON di level API (`responseMimeType: "application/json"`), jauh
 lebih andal daripada hanya memintanya lewat prompt.
 
@@ -513,6 +649,20 @@ implementasi:
    "hanya paper yang punya abstract" terpenuhi di sisi OpenAlex tanpa perlu
    menyaring manual setelah fetch.
 
+4. **Feed memakai `referenced_works_count:>0`** (ditambahkan saat audit Fase 5).
+   `primary_topic` saja belum cukup: paper arkeologi Zaman Batu tetap muncul
+   di **urutan kedua feed Kesehatan**, dengan 24.109 sitasi tapi **0
+   referensi** — hampir pasti record yang tergabung atau korup, karena artikel
+   riset sungguhan hampir tidak pernah tanpa daftar pustaka. Feed diurut
+   sitasi, jadi record rusak dengan sitasi melambung langsung naik ke puncak.
+   Skor topiknya justru tinggi (0,969), jadi menyaring berdasarkan skor topik
+   tidak menolong — dan malah membuang paper sah seperti "Hallmarks of
+   Cancer" (0,468). Kandidat tetap ratusan ribu sampai jutaan per topik.
+
+   **Sengaja TIDAK dipakai di search:** banyak jurnal lokal Indonesia
+   terindeks tanpa referensi yang ter-parse, dan filter ini akan membuang
+   mereka dari hasil pencarian.
+
 Selain itu: abstrak **masih** dikirim sebagai `abstract_inverted_index` (tidak
 ada field `abstract` polos), jadi fungsi konversi di bawah tetap dibutuhkan.
 Parameter `select=` dipakai untuk membatasi field yang diminta agar payload
@@ -565,18 +715,19 @@ baca/
 │   │   │   └── page.tsx
 │   │   ├── profile/
 │   │   │   └── page.tsx
+│   │   ├── error.tsx / not-found.tsx
 │   │   └── api/
-│   │       ├── feed/
-│   │       │   └── route.ts
-│   │       ├── summarize/
-│   │       │   └── route.ts
-│   │       └── search/
-│   │           └── route.ts
+│   │       ├── feed/route.ts
+│   │       ├── summarize/route.ts    # GET, di-cache CDN
+│   │       ├── search/route.ts
+│   │       ├── event/route.ts        # Metrik anonim (sendBeacon)
+│   │       └── stats/route.ts        # Baca metrik, pakai STATS_TOKEN
 │   ├── components/
 │   │   ├── layout/
 │   │   │   ├── BottomNav.tsx
 │   │   │   ├── TopBar.tsx
-│   │   │   └── AppShell.tsx
+│   │   │   ├── OfflineBanner.tsx
+│   │   │   └── AppShell.tsx        # LazyMotion + MotionConfig + Toast + <main>
 │   │   ├── feed/
 │   │   │   ├── PaperCard.tsx
 │   │   │   ├── PaperList.tsx       # Kartu + summarize + reader, dipakai Feed/Search/Saved
@@ -591,30 +742,38 @@ baca/
 │   │   └── ui/
 │   │       ├── Shimmer.tsx
 │   │       ├── Toast.tsx
-│   │       └── EmptyState.tsx
+│   │       ├── EmptyState.tsx
+│   │       └── HookText.tsx        # Hook + garis bawah amber, dipakai kartu & reader
 │   ├── lib/
-│   │   ├── openalex.ts           # OpenAlex API helpers
-│   │   ├── summarize.ts          # AI summarization (Gemini, provider-agnostic)
-│   │   ├── supabase.ts           # Supabase client
+│   │   ├── openalex.ts           # OpenAlex API helpers (server-only)
+│   │   ├── summarize.ts          # AI summarization (Gemini, provider-agnostic, server-only)
+│   │   ├── redis.ts              # Klien Upstash bersama (server-only)
+│   │   ├── summary-cache.ts      # Cache ringkasan di Redis
+│   │   ├── ai-budget.ts          # Batas harian global panggilan AI
+│   │   ├── metrics.ts            # Penghitung metrik anonim
+│   │   ├── ratelimit.ts          # Upstash Ratelimit wrapper
+│   │   ├── analytics.ts          # Kirim event metrik (client)
+│   │   ├── feed-url.ts           # Perakit URL /api/feed (dipakai useFeed & preload)
+│   │   ├── feed-preload.ts       # Skrip preload /api/feed di root layout
+│   │   ├── storage-keys.ts       # Kunci localStorage (modul netral)
+│   │   ├── topics.ts             # Pemetaan topik → field OpenAlex, warna titik
+│   │   ├── motion-features.ts    # Fitur Framer Motion yang dimuat asinkron
+│   │   ├── share.ts              # Web Share API + fallback clipboard
 │   │   ├── rerank.ts             # Balanced re-ranking logic
-│   │   ├── abstract.ts           # Inverted index → text
-│   │   └── ratelimit.ts          # Upstash Ratelimit wrapper
+│   │   └── abstract.ts           # Inverted index → text
 │   ├── hooks/
 │   │   ├── useFeed.ts            # Feed data fetching + state
 │   │   ├── useLocalStorage.ts    # localStorage bertipe (useSyncExternalStore)
 │   │   ├── usePaperCollections.ts   # Bookmark + riwayat baca
+│   │   ├── useOnlineStatus.ts    # Deteksi offline
 │   │   ├── useReader.ts          # Reader overlay state
 │   │   └── useViewportSummarize.ts  # IntersectionObserver + concurrency limiter
 │   ├── styles/
-│   │   ├── globals.css           # Noise grain, custom transitions, SVG underlines
 │   │   └── tokens.css            # CSS custom properties (warna, spacing)
-│   ├── stores/
-│   │   └── preferences.ts        # Zustand store untuk state global
 │   └── types/
 │       └── index.ts              # TypeScript types (Paper, Summary, etc.)
 ├── .env.local                    # API keys (lihat Bagian 8 untuk daftar lengkap)
-├── tailwind.config.ts
-├── next.config.ts
+├── next.config.ts                # Serwist + experimental.inlineCss
 ├── tsconfig.json
 └── package.json
 ```
@@ -646,29 +805,43 @@ lebih baru dari yang diasumsikan draft ini. Beberapa penyesuaian teknis
 - **PWA icons (192/512 PNG):** `public/manifest.json` sudah mereferensikan
   path-nya, tapi file PNG asli belum dibuat — sesuai pembagian scope SPEC
   sendiri (Fase 1 langkah 6 = "dasar", Fase 5 langkah 28 = "PWA icons").
+- **Tanpa Zustand.** Draft struktur folder menyebut `stores/preferences.ts`
+  (Zustand), tapi state global app hanya preferensi & koleksi di
+  localStorage. `useSyncExternalStore` (lihat Bagian 2, localStorage Keys)
+  sudah menyinkronkan semua komponen yang membaca kunci yang sama, jadi
+  store tambahan hanya akan jadi sumber kebenaran kedua. `tailwind.config.ts`
+  juga tidak ada (Tailwind v4, lihat di atas).
+- **`server-only`.** Modul yang memegang secret (`openalex`, `summarize`,
+  `redis`, `ratelimit`, dst) diawali `import "server-only"`: build gagal kalau
+  ada komponen browser yang tidak sengaja mengimpornya. Daftar topik yang
+  dibutuhkan komponen browser dipindah ke `lib/topics.ts` karena alasan ini.
 
 ---
 
 ## 8. ENVIRONMENT VARIABLES
 
 ```env
+# Upstash Redis — rate limiting, cache ringkasan, batas AI, metrik (WAJIB di produksi)
+UPSTASH_REDIS_REST_URL=     # dari console.upstash.com → database → REST API
+UPSTASH_REDIS_REST_TOKEN=
+
+# Google Gemini API (ada free tier)
+GEMINI_API_KEY=             # dari aistudio.google.com/apikey
+GEMINI_MODEL=               # OPSIONAL, default gemini-3.5-flash-lite
+AI_DAILY_LIMIT=             # OPSIONAL, default 1000 panggilan AI/hari untuk semua user
+
 # OpenAlex
 OPENALEX_API_KEY=           # dari openalex.org/settings/api
 
-# Google Gemini API (gratis, tanpa kartu kredit)
-GEMINI_API_KEY=             # dari aistudio.google.com/apikey
-
-# Supabase (server-side only — semua akses lewat API routes)
-SUPABASE_URL=               # dari supabase.com project settings (TANPA NEXT_PUBLIC_)
-SUPABASE_SERVICE_KEY=       # service role key, server-side only
-
-# Upstash Redis (rate limiting)
-UPSTASH_REDIS_REST_URL=     # dari upstash.com console
-UPSTASH_REDIS_REST_TOKEN=   # dari upstash.com console
+# OPSIONAL — token untuk membaca metrik di GET /api/stats. Kosong = endpoint mati.
+STATS_TOKEN=                # string acak panjang, mis. `openssl rand -hex 32`
 
 # OPSIONAL — untuk upgrade ke Claude API nanti
 # ANTHROPIC_API_KEY=        # dari console.anthropic.com
 ```
+
+> Supabase (`SUPABASE_URL`, `SUPABASE_SERVICE_KEY`) dihapus saat audit Fase 5
+> — lihat "Audit arsitektur" di Bagian 2.
 
 ---
 
@@ -687,8 +860,8 @@ UPSTASH_REDIS_REST_TOKEN=   # dari upstash.com console
 8. Buat lib/openalex.ts + lib/rerank.ts + lib/abstract.ts
 9. VERIFIKASI filter `topics.field.id` terhadap respons live OpenAlex (post-Walden) —
    kalau berubah, sesuaikan path filter di sini sebelum lanjut
-10. Setup Supabase project + tabel summaries
-11. Buat `/api/summarize` route (paper_id only → server-side fetch → Gemini API → Supabase cache)
+10. Setup Supabase project + tabel summaries *(diganti cache Upstash Redis saat audit Fase 5)*
+11. Buat `/api/summarize` route (paper_id only → server-side fetch → Gemini API → cache) *(kini GET + CDN, lihat Bagian 2)*
 12. Buat `/api/search` route (proxy OpenAlex search)
 13. Pasang rate limiting (Upstash Ratelimit) di semua API routes
 
@@ -720,11 +893,14 @@ UPSTASH_REDIS_REST_TOKEN=   # dari upstash.com console
 
 > **Metrik (langkah 29).** Dua metrik di atas tidak bisa dijawab pageview
 > biasa — membuka reader dan mengklik "Buka paper asli" sama-sama terjadi tanpa
-> perpindahan halaman. Karena itu dipasang dua event kustom di
-> `lib/analytics.ts`: `paper_opened` (reader dibuka) dan
-> `original_paper_opened` (tautan sumber diklik). Keduanya hanya mengirim id
-> paper dan nama topik — tidak ada yang bisa mengidentifikasi orang.
-> `track()` tidak melakukan apa-apa di luar produksi Vercel.
+> perpindahan halaman. Rencana awal memakai custom event Vercel Analytics,
+> tapi fitur itu **tidak tersedia di plan Hobby** (terverifikasi di tabel harga
+> Vercel saat audit). Gantinya penghitung anonim sendiri di Upstash:
+> `lib/analytics.ts` mengirim `paper_opened` dan `original_paper_opened` lewat
+> `sendBeacon` ke `/api/event`, bersama UUID acak per browser. Yang dikirim
+> hanya nama event dan UUID itu — bukan id paper, bukan topik. Perangkat unik
+> dihitung dengan HyperLogLog. Vercel Web Analytics tetap dipakai untuk
+> pageview. Hasilnya dibaca lewat `GET /api/stats` (lihat Bagian 11).
 
 ---
 
@@ -737,9 +913,19 @@ UPSTASH_REDIS_REST_TOKEN=   # dari upstash.com console
 | `UPSTASH_REDIS_REST_URL` | **Seluruh API route balas 429.** App tampak rusak total. |
 | `UPSTASH_REDIS_REST_TOKEN` | Sama seperti di atas. |
 | `GEMINI_API_KEY` | Kartu tampil, tapi semua ringkasan jatuh ke fallback (hook = judul asli, tanpa garis bawah amber). |
-| `SUPABASE_URL` | Cache summary mati — tiap user memicu panggilan AI baru untuk paper yang sama. |
-| `SUPABASE_SERVICE_KEY` | Sama seperti di atas. Gunakan service_role key, BUKAN anon key. |
 | `OPENALEX_API_KEY` | App tetap jalan lewat polite pool, tapi kuotanya hanya ~1.000 request/hari **per IP** — terlalu kecil untuk produksi. |
+
+Opsional: `GEMINI_MODEL` (default `gemini-3.5-flash-lite`), `AI_DAILY_LIMIT`
+(default 1000 — sesuaikan dengan batas free tier yang tertera di
+aistudio.google.com/rate-limit), dan `STATS_TOKEN` (tanpanya `/api/stats` mati).
+
+### Membaca metrik
+```
+curl -H "Authorization: Bearer <STATS_TOKEN>" https://<domain>/api/stats
+```
+Hasilnya 4 minggu terakhir. `percentReachingOriginal` = metrik 1 (persen
+pembaca yang sampai ke paper asli), `papersPerReader` = metrik 2 (rata-rata
+paper dibaca per pembaca per minggu).
 
 > **Yang paling gampang bikin panik:** rate limiting sengaja *fail closed* di
 > produksi (Bagian 2). Deploy tanpa kredensial Upstash membuat `/api/feed`,
@@ -755,7 +941,13 @@ Butuh perangkat fisik, tidak bisa diverifikasi dari emulator:
 - [ ] iOS: `100dvh`/`94dvh` tidak terpotong toolbar Safari
 - [ ] Keduanya: transisi gelap→terang tetap 60fps di perangkat kelas menengah
 - [ ] Keduanya: matikan data seluler → banner offline muncul, `/saved` tetap terbaca
-- [ ] Lighthouse mobile di URL produksi: Performance > 90 (Standar Kualitas Bagian 2)
+- [ ] PageSpeed Insights (pagespeed.web.dev) di URL produksi, mode mobile:
+      Performance > 90 untuk `/onboarding` dan `/feed` (Standar Kualitas Bagian 2).
+      Ini ukuran yang mengikat — angka localhost tidak merepresentasikan HTTP/2 Vercel
+- [ ] Buka ringkasan paper yang sama dua kali dari dua perangkat berbeda: yang
+      kedua harus instan (dilayani cache CDN/Redis, tanpa shimmer lama)
+- [ ] `curl /api/stats` dengan token → angka minggu ini bertambah setelah membuka
+      beberapa paper
 
 ---
 

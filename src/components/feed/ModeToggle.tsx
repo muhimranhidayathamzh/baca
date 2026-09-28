@@ -1,6 +1,6 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import type { FeedMode } from "@/types";
 
 const MODES: Array<{ value: FeedMode; label: string }> = [
@@ -32,7 +32,7 @@ export default function ModeToggle({
             className="relative rounded-full px-3 py-1 font-ui text-[12.5px] font-medium"
           >
             {isActive && (
-              <motion.span
+              <m.span
                 layoutId="mode-toggle-pill"
                 className="absolute inset-0 rounded-full bg-amber-lo ring-1 ring-amber/40"
                 transition={{ type: "spring", damping: 25, stiffness: 300 }}

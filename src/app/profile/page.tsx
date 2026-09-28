@@ -1,6 +1,6 @@
 "use client";
 
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import TopicPicker from "@/components/onboarding/TopicPicker";
@@ -12,8 +12,7 @@ import {
   useLocalStorage,
 } from "@/hooks/useLocalStorage";
 import { useReadHistory, useSavedPapers } from "@/hooks/usePaperCollections";
-import { TOPIC_DOT_COLOR } from "@/lib/topics";
-import { TOPICS } from "@/lib/openalex";
+import { TOPICS, TOPIC_DOT_COLOR } from "@/lib/topics";
 import type { TopicName } from "@/types";
 
 const MIN_TOPICS = 3;
@@ -118,7 +117,7 @@ export default function ProfilePage() {
 
           <AnimatePresence mode="wait" initial={false}>
             {editing ? (
-              <motion.div
+              <m.div
                 key="editor"
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -129,7 +128,7 @@ export default function ProfilePage() {
                 <TopicPicker selected={draft} onToggle={toggleDraft} />
 
                 <div className="mt-4 flex items-center gap-3">
-                  <motion.button
+                  <m.button
                     type="button"
                     onClick={saveTopics}
                     disabled={draft.length < MIN_TOPICS}
@@ -139,7 +138,7 @@ export default function ProfilePage() {
                     className="rounded-full bg-amber px-5 py-2 font-ui text-[13.5px] font-medium text-desk disabled:cursor-not-allowed"
                   >
                     Simpan
-                  </motion.button>
+                  </m.button>
                   <button
                     type="button"
                     onClick={() => setEditing(false)}
@@ -153,9 +152,9 @@ export default function ProfilePage() {
                     </span>
                   )}
                 </div>
-              </motion.div>
+              </m.div>
             ) : (
-              <motion.ul
+              <m.ul
                 key="list"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -176,7 +175,7 @@ export default function ProfilePage() {
                     {topic}
                   </li>
                 ))}
-              </motion.ul>
+              </m.ul>
             )}
           </AnimatePresence>
         </section>
@@ -185,15 +184,22 @@ export default function ProfilePage() {
           <h2 className="font-ui text-[11.5px] font-semibold uppercase tracking-[0.06em] text-on-d3">
             Data lokal
           </h2>
+          {/*
+            Klaim lama "tidak pernah dikirim ke mana pun" tidak akurat: riwayat
+            baca ikut terkirim ke /api/feed (sebagai `exclude`, supaya paper
+            yang sudah dibaca tidak muncul lagi), dan ada penghitung metrik
+            anonim. Kalimat ini hanya menjanjikan yang memang benar.
+          */}
           <p className="mt-2 font-ui text-[13px] leading-relaxed text-on-d3">
-            Semua bookmark, riwayat, dan preferensi kamu disimpan di browser ini
-            saja — tidak pernah dikirim ke mana pun.
+            Bookmark, riwayat, dan preferensi kamu disimpan di browser ini — tidak
+            ada akun, dan server kami tidak menyimpan apa yang kamu baca. Kami
+            hanya menghitung angka anonim, seperti berapa paper yang dibuka.
           </p>
 
           {/* Reset tidak bisa dibatalkan, jadi butuh dua langkah. */}
           <AnimatePresence mode="wait" initial={false}>
             {confirmingReset ? (
-              <motion.div
+              <m.div
                 key="confirm"
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -221,9 +227,9 @@ export default function ProfilePage() {
                     Batal
                   </button>
                 </div>
-              </motion.div>
+              </m.div>
             ) : (
-              <motion.button
+              <m.button
                 key="trigger"
                 type="button"
                 onClick={() => setConfirmingReset(true)}
@@ -234,7 +240,7 @@ export default function ProfilePage() {
                 className="mt-4 rounded-full border border-desk-line px-4 py-2 font-ui text-[13px] text-on-d2"
               >
                 Reset semua data
-              </motion.button>
+              </m.button>
             )}
           </AnimatePresence>
         </section>

@@ -1,10 +1,11 @@
 "use client";
 
-import { AnimatePresence, motion, useDragControls, type PanInfo } from "framer-motion";
+import { AnimatePresence, m, useDragControls, type PanInfo } from "framer-motion";
 import { Bookmark, ChevronDown, ExternalLink, Info, Share2 } from "lucide-react";
 import { useEffect } from "react";
 import DeepRead from "./DeepRead";
 import QuickTake from "./QuickTake";
+import HookText from "@/components/ui/HookText";
 import Shimmer from "@/components/ui/Shimmer";
 import { useToast } from "@/components/ui/Toast";
 import { trackOriginalPaperOpened } from "@/lib/analytics";
@@ -87,13 +88,16 @@ export default function ReaderOverlay({
 
   const summary = state?.status === "done" ? state.summary : null;
   const authors = paper ? formatAuthors(paper.authors) : null;
+  // Fallback memakai judul asli sebagai "hook" — itu bukan hook sungguhan.
+  const hasHook = Boolean(summary && paper && summary.hook !== paper.title);
+  const isLoading = !state || state.status === "loading";
 
   return (
     <AnimatePresence>
       {paper && (
         <>
           {/* Meja gelap meredup jadi latar — dunia mundur, halaman menyala. */}
-          <motion.div
+          <m.div
             key="reader-scrim"
             className="fixed inset-0 z-[70] bg-desk"
             initial={{ opacity: 0 }}
@@ -103,7 +107,7 @@ export default function ReaderOverlay({
             onClick={onClose}
           />
 
-          <motion.div
+          <m.div
             key="reader-panel"
             className="fixed inset-x-0 bottom-0 z-[80] flex h-[94dvh] flex-col overflow-hidden rounded-t-[20px] bg-page"
             initial={{ y: "100%" }}
@@ -148,7 +152,7 @@ export default function ReaderOverlay({
                     aria-pressed={isSaved}
                     className="p-1 text-page-ink2"
                   >
-                    <motion.span
+                    <m.span
                       className="block"
                       animate={{ scale: isSaved ? 1.12 : 1 }}
                       transition={SLIDE_SPRING}
@@ -158,7 +162,7 @@ export default function ReaderOverlay({
                         strokeWidth={1.75}
                         className={isSaved ? "fill-amber text-amber" : ""}
                       />
-                    </motion.span>
+                    </m.span>
                   </button>
 
                   <button
@@ -173,14 +177,14 @@ export default function ReaderOverlay({
               </div>
             </div>
 
-            <motion.div
+            <m.div
               className="scrollbar-none flex-1 overflow-y-auto px-6 pb-10"
               variants={contentVariants}
               initial="hidden"
               animate="visible"
             >
               {paper.topic && (
-                <motion.div variants={itemVariants} className="mb-3 flex items-center gap-2">
+                <m.div variants={itemVariants} className="mb-3 flex items-center gap-2">
                   <span
                     className="size-[7px] shrink-0 rounded-full"
                     style={{ backgroundColor: TOPIC_DOT_COLOR[paper.topic] }}
@@ -189,19 +193,57 @@ export default function ReaderOverlay({
                   <span className="font-ui text-[10.5px] font-semibold uppercase tracking-[0.08em] text-page-ink2">
                     {paper.topic}
                   </span>
-                </motion.div>
+                </m.div>
               )}
 
-              <motion.h1
-                variants={itemVariants}
-                className="font-serif-read text-[23px] font-medium leading-[1.28] tracking-[-0.01em] text-page-ink"
-              >
-                {paper.title}
-              </motion.h1>
+              {/*
+                Headline reader = hook yang sama dengan di kartu, lengkap dengan
+                coretan amber yang identik. Pertanyaan itulah yang membuat user
+                mengetuk; kalau reader langsung membuka judul Inggris yang
+                panjang, rasa penasarannya putus di tengah jalan. Judul asli
+                tetap ada, tepat di bawahnya, dalam serif italic.
 
-              <motion.p
+                Saat ringkasannya fallback (hook = judul asli) atau gagal, judul
+                asli kembali jadi headline — tidak ada judul yang tampil dua kali.
+              */}
+              {hasHook || isLoading ? (
+                <>
+                  {hasHook ? (
+                    <m.h1
+                      variants={itemVariants}
+                      className="font-grotesk text-[24px] font-medium leading-[1.3] tracking-[-0.015em] text-page-ink"
+                    >
+                      <HookText hook={summary!.hook} keyPhrase={summary!.key} paperId={paper.id} />
+                    </m.h1>
+                  ) : (
+                    <m.div
+                      variants={itemVariants}
+                      className="flex flex-col gap-2.5 py-1"
+                      aria-label="Memuat ringkasan"
+                    >
+                      <Shimmer className="h-6 w-[92%] !bg-page-line" />
+                      <Shimmer className="h-6 w-[60%] !bg-page-line" />
+                    </m.div>
+                  )}
+                  <m.p
+                    variants={itemVariants}
+                    className="mt-3 font-serif-read text-[15px] italic leading-relaxed text-page-ink2"
+                  >
+                    {paper.title}
+                  </m.p>
+                </>
+              ) : (
+                <m.h1
+                  variants={itemVariants}
+                  className="font-serif-read text-[23px] font-medium leading-[1.28] tracking-[-0.01em] text-page-ink"
+                >
+                  {paper.title}
+                </m.h1>
+              )}
+
+              <m.p
                 variants={itemVariants}
-                className="mb-6 mt-2 font-ui text-[12.5px] leading-relaxed text-page-ink2"
+                className="mb-6 mt-2.5 font-ui text-[12.5px] leading-relaxed text-page-ink2"
               >
                 {[
                   authors,
@@ -211,9 +253,9 @@ export default function ReaderOverlay({
                 ]
                   .filter(Boolean)
                   .join(" · ")}
-              </motion.p>
+              </m.p>
 
-              <motion.div variants={itemVariants}>
+              <m.div variants={itemVariants}>
                 {summary ? (
                   <>
                     <QuickTake items={summary.quick} />
@@ -231,31 +273,31 @@ export default function ReaderOverlay({
                     <Shimmer className="h-4 w-[70%] !bg-page-line" />
                   </div>
                 )}
-              </motion.div>
+              </m.div>
 
-              <motion.a
+              <m.a
                 variants={itemVariants}
                 href={paper.url}
                 target="_blank"
                 rel="noopener noreferrer"
                 // Metrik utama SPEC Bagian 9 langkah 29: berapa % user yang
                 // benar-benar sampai ke paper aslinya.
-                onClick={() => trackOriginalPaperOpened(paper.id, paper.topic)}
+                onClick={trackOriginalPaperOpened}
                 className="mt-5 flex items-center justify-center gap-2 rounded-[12px] bg-page-ink px-4 py-3.5 font-ui text-[14.5px] font-medium text-page"
               >
                 <ExternalLink size={17} strokeWidth={1.75} />
                 Buka paper asli
-              </motion.a>
+              </m.a>
 
-              <motion.p
+              <m.p
                 variants={itemVariants}
                 className="mt-4 flex items-center justify-center gap-1.5 text-center font-ui text-[11.5px] leading-relaxed text-page-ink2"
               >
                 <Info size={13} strokeWidth={1.75} className="shrink-0" />
                 Ringkasan otomatis — selalu cek sumber asli
-              </motion.p>
-            </motion.div>
-          </motion.div>
+              </m.p>
+            </m.div>
+          </m.div>
         </>
       )}
     </AnimatePresence>

@@ -3,7 +3,7 @@ import Link from "next/link";
 /** Halaman 404 (SPEC.md langkah 26). */
 export default function NotFound() {
   return (
-    <main className="flex flex-1 flex-col items-center justify-center px-8 text-center">
+    <div className="flex flex-1 flex-col items-center justify-center px-8 py-20 text-center">
       <p className="font-grotesk text-[32px] font-medium tracking-[-0.02em] text-on-d">
         404
       </p>
@@ -17,6 +17,6 @@ export default function NotFound() {
       >
         Kembali ke feed
       </Link>
-    </main>
+    </div>
   );
 }

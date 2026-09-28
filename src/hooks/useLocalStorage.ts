@@ -1,24 +1,9 @@
 "use client";
 
 import { useCallback, useRef, useSyncExternalStore } from "react";
+import { STORAGE_KEYS } from "@/lib/storage-keys";
 
-/**
- * Kunci localStorage (SPEC.md Bagian 2). Dikumpulkan di satu tempat supaya
- * tidak ada typo string yang tersebar di banyak file.
- */
-export const STORAGE_KEYS = {
-  onboarded: "baca_onboarded",
-  topics: "baca_topics",
-  mode: "baca_mode",
-  saved: "baca_saved",
-  readHistory: "baca_read_history",
-  /**
-   * Chip topik yang sedang aktif di feed. Tidak ada di daftar awal SPEC —
-   * ditambahkan supaya pilihan chip user bertahan saat pindah halaman dan
-   * kembali lagi, bukan selalu reset ke topik pertama.
-   */
-  activeTopic: "baca_active_topic",
-} as const;
+export { STORAGE_KEYS };
 
 /**
  * Event internal untuk sinkronisasi antar komponen di tab yang sama.

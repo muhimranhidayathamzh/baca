@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { buildFeedUrl } from "@/lib/feed-url";
 import type { FeedMode, FeedResponse, Paper, TopicName } from "@/types";
 
 interface UseFeedParams {
@@ -76,19 +77,18 @@ export function useFeed({ topic, mode, exclude, enabled }: UseFeedParams) {
       const requestId = ++requestIdRef.current;
 
       const [topicPart, modePart] = key.split("|");
-      const params = new URLSearchParams();
-      if (topicPart) params.set("topic", topicPart);
-      params.set("mode", modePart ?? "fokus");
-      if (!reset && cursor) params.set("cursor", cursor);
-      if (!reset && seed !== undefined) params.set("seed", String(seed));
-      if (excludeRef.current.length > 0) {
-        params.set("exclude", excludeRef.current.join(","));
-      }
+      // Dirakit lewat fungsi yang sama dengan skrip preload di feed/layout.tsx,
+      // supaya request pertama memakai ulang respons yang sudah di-preload.
+      const url = buildFeedUrl(
+        topicPart || null,
+        modePart || "fokus",
+        excludeRef.current,
+        reset ? null : cursor,
+        reset || seed === undefined ? null : seed,
+      );
 
       try {
-        const response = await fetch(`/api/feed?${params.toString()}`, {
-          signal: controller.signal,
-        });
+        const response = await fetch(url, { signal: controller.signal });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = (await response.json()) as FeedResponse;
 
@@ -126,17 +126,11 @@ export function useFeed({ topic, mode, exclude, enabled }: UseFeedParams) {
     [],
   );
 
-  // Muat ulang dari awal setiap kali topik atau mode berganti.
-  //
-  // `fetchPage` baru memanggil setState SETELAH await, jadi tidak ada cascading
-  // render yang sebenarnya. Aturan lint ini menandai fungsi apa pun yang
-  // mengandung setState bila dipanggil dari effect — ia tidak bisa melihat
-  // batas async. Mengambil data saat parameter berubah memang tugas effect,
-  // dan status "loading" pun diturunkan dari `key` yang basi, bukan di-set
-  // di sini. Dimatikan sebatas satu baris ini.
+  // Muat ulang dari awal setiap kali topik atau mode berganti. `fetchPage`
+  // baru memanggil setState setelah await, dan status "loading" diturunkan dari
+  // `key` yang basi — bukan di-set di sini.
   useEffect(() => {
     if (!enabled) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void fetchPage(requestKey, null, undefined, true);
   }, [enabled, requestKey, fetchPage]);
 
