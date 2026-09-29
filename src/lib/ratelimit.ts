@@ -93,6 +93,8 @@ export interface RateLimitResult {
   success: boolean;
   /** Alasan gagal, untuk logging — tidak pernah dibocorkan ke client. */
   reason?: "limit_exceeded" | "not_configured";
+  /** Detik sampai jatah IP ini terbuka lagi (hanya dari Upstash). */
+  retryAfter?: number;
 }
 
 /**
@@ -108,8 +110,14 @@ export async function checkRateLimit(
 
   if (limiter) {
     try {
-      const { success } = await limiter.limit(identifier);
-      return success ? { success: true } : { success: false, reason: "limit_exceeded" };
+      const { success, reset } = await limiter.limit(identifier);
+      return success
+        ? { success: true }
+        : {
+            success: false,
+            reason: "limit_exceeded",
+            retryAfter: Math.max(1, Math.ceil((reset - Date.now()) / 1000)),
+          };
     } catch (error) {
       // Upstash tidak bisa dihubungi. Di produksi jangan diam-diam membuka
       // pintu — tolak. Saat dev, mundur ke limiter in-memory.
@@ -133,15 +141,19 @@ export async function checkRateLimit(
     : { success: false, reason: "limit_exceeded" };
 }
 
-/** Response 429 seragam untuk semua route (SPEC.md Bagian 2). */
-export function tooManyRequests(): Response {
+/**
+ * Response 429 seragam untuk semua route (SPEC.md Bagian 2). `Retry-After`
+ * berisi jeda sebenarnya dari Upstash kalau ada — kartu feed memakainya untuk
+ * menunggu lalu mencoba lagi, bukan langsung menyerah.
+ */
+export function tooManyRequests(retryAfter = 60): Response {
   return Response.json(
     { error: "Too many requests" },
     {
       status: 429,
       // no-store: /api/summarize kini GET yang di-cache CDN — penolakan ini
       // tidak boleh ikut tersimpan dan disajikan ke user lain.
-      headers: { "Retry-After": "60", "Cache-Control": "no-store" },
+      headers: { "Retry-After": String(retryAfter), "Cache-Control": "no-store" },
     },
   );
 }

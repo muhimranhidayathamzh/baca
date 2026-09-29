@@ -1,52 +1,44 @@
 import "server-only";
-import { GoogleGenAI, ThinkingLevel, type ThinkingConfig } from "@google/genai";
+import { generateJson, stripCodeFence } from "./ai";
 import type { Summary } from "@/types";
-
-/**
- * Lapisan summarization yang provider-agnostic (SPEC.md Bagian 5).
- *
- * Seluruh app hanya memanggil `summarizePaper(title, abstract)`. Untuk pindah
- * ke Claude API nanti: ganti isi file ini saja, tambah ANTHROPIC_API_KEY di
- * .env.local — tidak ada perubahan di route mana pun.
- */
-
-/**
- * Nama model bisa diatur lewat env supaya tidak perlu ubah kode saat Google
- * memensiunkan sebuah versi.
- *
- * Default `gemini-3.5-flash-lite`: per September 2026 Google membatasi akses
- * model 2.5 hanya untuk akun yang pernah memakainya, jadi API key baru akan
- * ditolak. Flash-Lite dipilih karena tugasnya sederhana (abstrak pendek →
- * JSON) dan kecepatan penting — kartu menampilkan shimmer selama menunggu.
- */
-const DEFAULT_MODEL = "gemini-3.5-flash-lite";
 
 /** Batas panjang abstrak yang dikirim ke model (SPEC.md Bagian 5). */
 const MAX_ABSTRACT_CHARS = 1500;
 
 /**
- * Token "thinking" pada model Gemini 3.x ikut dihitung ke batas ini sebagai
- * batas keras. Output JSON-nya sendiri hanya ~300 token, tapi dengan batas
- * 1000 seperti draft awal SPEC, pemikiran yang panjang bisa memotong JSON di
- * tengah jalan dan memaksa fallback. 2048 memberi ruang aman.
+ * Kata pembuka yang disarankan ke model, dipilih dari id paper.
+ *
+ * Aturan umum "variasikan pertanyaannya" tidak cukup: model hanya pindah dari
+ * satu kebiasaan ke kebiasaan lain (versi 1: hampir semua "Bagaimana…";
+ * setelah aturan umum: 5 dari 8 hook "Benarkah…"). Setiap panggilan berdiri
+ * sendiri, jadi model tidak tahu hook kartu sebelahnya. Saran yang berbeda per
+ * paper menyebarkan variasinya di sepanjang feed. Deterministik (bukan acak)
+ * supaya paper yang sama selalu mendapat prompt yang sama.
  */
-const MAX_OUTPUT_TOKENS = 2048;
+const OPENERS = [
+  "Apa",
+  "Kenapa",
+  "Seberapa",
+  "Bagaimana",
+  "Apakah",
+  "Bisakah",
+  "Berapa",
+  "Benarkah",
+  "Mungkinkah",
+  "Siapa",
+] as const;
 
-/**
- * Tingkat thinking terendah yang diizinkan tiap keluarga model. Thinking tidak
- * bisa dimatikan sepenuhnya di 3.x, dan nilai yang tidak didukung membuat API
- * menolak request — mis. "minimal" hanya sah untuk Flash-Lite, sementara
- * Flash biasa minimal "low".
- */
-function thinkingConfigFor(model: string): ThinkingConfig | undefined {
-  if (model.startsWith("gemini-2")) return { thinkingBudget: 0 };
-  if (model.includes("lite")) return { thinkingLevel: ThinkingLevel.MINIMAL };
-  if (model.startsWith("gemini-3")) return { thinkingLevel: ThinkingLevel.LOW };
-  return undefined;
+function suggestedOpener(paperId: string): string {
+  let hash = 0;
+  for (let i = 0; i < paperId.length; i++) hash = (hash * 31 + paperId.charCodeAt(i)) >>> 0;
+  return OPENERS[hash % OPENERS.length]!;
 }
 
-/** Prompt persis seperti SPEC.md Bagian 5. */
-function buildPrompt(title: string, abstract: string): string {
+/**
+ * Prompt SPEC.md Bagian 5, versi 3 (lihat lib/summary-version.ts): ditambah
+ * saran kata pembuka dan larangan membuka dengan nama alat/singkatan teknis.
+ */
+function buildPrompt(title: string, abstract: string, opener: string): string {
   return `Kamu adalah editor sains populer berbahasa Indonesia. Dari judul dan abstrak paper
 akademis ini, buatkan:
 
@@ -55,6 +47,10 @@ akademis ini, buatkan:
    - Harus berupa pertanyaan, bukan klaim
    - Jangan clickbait atau overclaim
    - Cukup bikin penasaran, netral secara ilmiah
+   - Awali dengan kata "${opener}" kalau itu menghasilkan pertanyaan yang wajar
+     dan tetap setia pada isi abstrak. Kalau janggal, pakai kata tanya lain yang
+     paling pas.
+   - Jangan diawali nama alat, dataset, atau singkatan teknis dari judul.
 
 2. "key": satu frasa (2-4 kata) dari hook yang paling penting untuk di-highlight.
    Harus substring persis dari hook.
@@ -81,40 +77,20 @@ ABSTRAK: ${abstract.slice(0, MAX_ABSTRACT_CHARS)}
 Jawab HANYA dalam format JSON valid. Tanpa markdown, tanpa backtick, tanpa penjelasan.`;
 }
 
-let cachedClient: GoogleGenAI | null = null;
-
-function getClient(): GoogleGenAI | null {
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
-  if (!apiKey) return null;
-  if (!cachedClient) cachedClient = new GoogleGenAI({ apiKey });
-  return cachedClient;
-}
-
-export function isSummarizerConfigured(): boolean {
-  return getClient() !== null;
-}
-
 /**
- * Fallback saat abstrak kosong atau AI gagal (SPEC.md Bagian 2).
- * Selalu mengembalikan sesuatu yang aman ditampilkan — lebih baik kurang info
- * daripada salah info.
+ * Ringkasan untuk paper yang abstraknya memang kosong di OpenAlex.
+ *
+ * HANYA untuk kasus itu. Kegagalan AI tidak memakai ini: dulu keduanya berbagi
+ * fallback yang sama, sehingga paper yang abstraknya ada pun tampil dengan
+ * tulisan "Abstrak tidak tersedia" setiap kali Gemini kena batas kuota.
  */
-export function fallbackSummary(title: string): Summary {
+export function noAbstractSummary(title: string): Summary {
   return {
     hook: title,
     key: null,
-    quick: ["Abstrak tidak tersedia."],
-    deep: "Buka paper asli untuk membaca.",
+    quick: ["Paper ini tidak menyertakan abstrak, jadi belum bisa diringkas."],
+    deep: "Buka paper asli untuk membaca isinya.",
   };
-}
-
-/** Buang pagar markdown kalau model tetap membungkus JSON-nya. */
-function stripCodeFence(text: string): string {
-  return text
-    .trim()
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/, "")
-    .trim();
 }
 
 /**
@@ -150,63 +126,36 @@ function parseSummary(raw: string): Summary | null {
   return { hook, key, quick: quick.slice(0, 3), deep };
 }
 
-async function callGemini(prompt: string): Promise<string | null> {
-  const client = getClient();
-  if (!client) return null;
-
-  const model = process.env.GEMINI_MODEL?.trim() || DEFAULT_MODEL;
-
-  const response = await client.models.generateContent({
-    model,
-    contents: prompt,
-    config: {
-      maxOutputTokens: MAX_OUTPUT_TOKENS,
-      // Memaksa output JSON di level API jauh lebih andal daripada sekadar
-      // memintanya lewat prompt.
-      responseMimeType: "application/json",
-      temperature: 0.7,
-      thinkingConfig: thinkingConfigFor(model),
-    },
-  });
-
-  return response.text ?? null;
-}
+export type SummarizeResult =
+  | { ok: true; summary: Summary }
+  /** Lihat `AiCallResult` di lib/ai.ts untuk arti `retryAfter`. */
+  | { ok: false; retryAfter: number | null };
 
 /**
- * Hasilkan ringkasan Bahasa Indonesia dari judul + abstrak.
- *
- * Mengembalikan null kalau summarizer tidak terkonfigurasi atau gagal setelah
- * retry — pemanggil yang memutuskan fallback-nya. Tidak pernah melempar error.
+ * Hasilkan ringkasan Bahasa Indonesia dari judul + abstrak. Tidak pernah
+ * melempar error — pemanggil yang memutuskan respons saat gagal.
  */
 export async function summarizePaper(
+  paperId: string,
   title: string,
   abstract: string,
-): Promise<Summary | null> {
-  if (!abstract.trim()) return null;
-  if (!isSummarizerConfigured()) {
-    console.error("[summarize] GEMINI_API_KEY belum diisi.");
-    return null;
-  }
-
-  const prompt = buildPrompt(title, abstract);
+): Promise<SummarizeResult> {
+  const prompt = buildPrompt(title, abstract, suggestedOpener(paperId));
 
   // Satu kali retry kalau model mengembalikan JSON tidak valid (SPEC.md Bagian 2).
   for (let attempt = 1; attempt <= 2; attempt++) {
-    try {
-      const raw = await callGemini(prompt);
-      if (raw) {
-        const summary = parseSummary(raw);
-        if (summary) return summary;
-        console.error(`[summarize] Output tidak valid (percobaan ${attempt}).`);
-      }
-    } catch (error) {
-      console.error(`[summarize] Panggilan gagal (percobaan ${attempt}):`, error);
-      // Error konfigurasi (model tidak ada, key salah) tidak akan sembuh
-      // dengan retry — hentikan supaya tidak membuang kuota.
-      const message = error instanceof Error ? error.message : String(error);
-      if (/not found|permission|api key|invalid/i.test(message)) break;
+    const result = await generateJson(prompt, { temperature: 0.8 });
+
+    if (!result.ok) {
+      // Kena kuota per menit: mencoba lagi detik ini juga hanya membakar
+      // kuota berikutnya dan pasti ditolak lagi. Serahkan jedanya ke client.
+      return { ok: false, retryAfter: result.retryAfter };
     }
+
+    const summary = parseSummary(result.text);
+    if (summary) return { ok: true, summary };
+    console.error(`[summarize] Output tidak valid (percobaan ${attempt}).`);
   }
 
-  return null;
+  return { ok: false, retryAfter: null };
 }

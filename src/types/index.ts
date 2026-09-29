@@ -65,10 +65,22 @@ export interface FeedResponse {
   nextCursor: string | null;
   /** Seed acak mode explore, dikirim balik supaya paginasi tetap konsisten. */
   seed?: number;
+  /**
+   * Ringkasan yang sudah ada di cache, per paper_id. Kartu-kartu ini tidak
+   * perlu memanggil /api/summarize. Paper yang belum diringkas tidak ada di sini.
+   */
+  summaries?: Record<string, Summary>;
 }
 
 /** Response /api/search. */
 export interface SearchResponse {
   papers: Paper[];
   nextPage: number | null;
+  /**
+   * Terjemahan ringkas query yang ikut dicari (mis. "rice farming" untuk
+   * "pertanian padi"), atau null kalau hanya query asli yang dipakai.
+   */
+  expandedLabel: string | null;
+  /** Sama seperti `FeedResponse.summaries`. */
+  summaries?: Record<string, Summary>;
 }

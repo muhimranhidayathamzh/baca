@@ -2,7 +2,8 @@
 
 import { useCallback } from "react";
 import { STORAGE_KEYS, useLocalStorage } from "./useLocalStorage";
-import type { Paper } from "@/types";
+import type { Affinity } from "@/lib/affinity";
+import type { Paper, TopicName } from "@/types";
 
 /**
  * Bookmark & riwayat baca — dua koleksi yang dipakai bareng oleh feed, reader,
@@ -12,12 +13,16 @@ import type { Paper } from "@/types";
  * Saved bisa menampilkan kartu tanpa perlu memanggil API lagi (SPEC.md 4.5).
  */
 
-/** Batas riwayat yang disimpan — dikirim ke /api/feed sebagai `exclude`. */
-const MAX_HISTORY = 200;
+/**
+ * Batas riwayat yang disimpan. Riwayat disaring di browser (hooks/useFeed.ts),
+ * jadi panjangnya tidak lagi dibatasi panjang URL.
+ */
+const MAX_HISTORY = 500;
 
 /** Array kosong yang identitasnya stabil, supaya snapshot tidak berubah-ubah. */
 const EMPTY_PAPERS: Paper[] = [];
 const EMPTY_IDS: string[] = [];
+const EMPTY_AFFINITY: Affinity = {};
 
 export function useSavedPapers() {
   const { value: saved, setValue } = useLocalStorage<Paper[]>(
@@ -59,4 +64,22 @@ export function useReadHistory() {
   );
 
   return { history, markAsRead } as const;
+}
+
+/** Hitungan "dibuka" per topik untuk feed "Untukmu" (lib/affinity.ts). */
+export function useTopicAffinity() {
+  const { value: affinity, setValue } = useLocalStorage<Affinity>(
+    STORAGE_KEYS.affinity,
+    EMPTY_AFFINITY,
+  );
+
+  const recordOpen = useCallback(
+    (topic: TopicName | null) => {
+      if (!topic) return;
+      setValue((prev) => ({ ...prev, [topic]: (prev[topic] ?? 0) + 1 }));
+    },
+    [setValue],
+  );
+
+  return { affinity, recordOpen } as const;
 }

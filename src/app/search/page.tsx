@@ -6,11 +6,42 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import PaperList from "@/components/feed/PaperList";
 import EmptyState from "@/components/ui/EmptyState";
 import { HookShimmer } from "@/components/ui/Shimmer";
+import { STORAGE_KEYS, useLocalStorage } from "@/hooks/useLocalStorage";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
-import type { Paper, SearchResponse } from "@/types";
+import { TOPICS } from "@/lib/topics";
+import type { Paper, SearchResponse, Summary, TopicName } from "@/types";
 
 /** Jeda sebelum mengetik dianggap selesai — hemat kuota, hemat rate limit. */
 const DEBOUNCE_MS = 450;
+
+/**
+ * Contoh pencarian per topik, sengaja ditulis dalam bahasa sehari-hari —
+ * menunjukkan bahwa user tidak perlu tahu istilah ilmiah atau bahasa Inggris
+ * (query diperluas di server, lihat lib/query-expand.ts).
+ */
+const EXAMPLES: Record<TopicName, string[]> = {
+  Kesehatan: ["puasa intermiten", "kesehatan mental remaja"],
+  AI: ["AI buat deteksi kanker", "chatbot di sekolah"],
+  Neurosains: ["kenapa susah tidur", "otak dan media sosial"],
+  Lingkungan: ["mikroplastik di laut", "pertanian padi"],
+  Psikologi: ["kebiasaan menunda", "kecemasan mahasiswa"],
+  Ekonomi: ["UMKM digital", "inflasi harga pangan"],
+};
+
+/** Contoh dari topik user dulu (bergiliran), baru topik lain, maksimum 6. */
+function examplesFor(topics: TopicName[]): string[] {
+  const ordered = [...topics, ...TOPICS.filter((t) => !topics.includes(t))];
+  const picks: string[] = [];
+  for (let round = 0; round < 2; round++) {
+    for (const topic of ordered) {
+      const example = EXAMPLES[topic][round];
+      if (example && picks.length < 6) picks.push(example);
+    }
+  }
+  return picks;
+}
+
+const EMPTY_TOPICS: TopicName[] = [];
 
 type Status = "idle" | "loading" | "done" | "error";
 
@@ -19,17 +50,30 @@ interface Result {
   q: string;
   papers: Paper[];
   nextPage: number | null;
+  /** Terjemahan query yang ikut dicari (dari halaman pertama). */
+  expandedLabel: string | null;
+  /** Ringkasan yang ikut terkirim bersama hasil (sudah ada di cache server). */
+  summaries: Record<string, Summary>;
   error: boolean;
 }
 
 const EMPTY_PAPERS: Paper[] = [];
-const INITIAL: Result = { q: "", papers: EMPTY_PAPERS, nextPage: null, error: false };
+const EMPTY_SUMMARIES: Record<string, Summary> = {};
+const INITIAL: Result = {
+  q: "",
+  papers: EMPTY_PAPERS,
+  nextPage: null,
+  expandedLabel: null,
+  summaries: EMPTY_SUMMARIES,
+  error: false,
+};
 
 export default function SearchPage() {
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
   const [result, setResult] = useState<Result>(INITIAL);
   const isOnline = useOnlineStatus();
+  const { value: savedTopics } = useLocalStorage<TopicName[]>(STORAGE_KEYS.topics, EMPTY_TOPICS);
 
   const abortRef = useRef<AbortController | null>(null);
   const requestIdRef = useRef(0);
@@ -68,13 +112,25 @@ export default function SearchPage() {
           q,
           papers: [...base, ...data.papers.filter((p) => !seen.has(p.id))],
           nextPage: data.nextPage,
+          expandedLabel: append && prev.q === q ? prev.expandedLabel : data.expandedLabel,
+          summaries:
+            append && prev.q === q
+              ? { ...prev.summaries, ...data.summaries }
+              : (data.summaries ?? EMPTY_SUMMARIES),
           error: false,
         };
       });
     } catch {
       if (controller.signal.aborted) return;
       if (requestId !== requestIdRef.current) return;
-      setResult({ q, papers: EMPTY_PAPERS, nextPage: null, error: true });
+      setResult({
+        q,
+        papers: EMPTY_PAPERS,
+        nextPage: null,
+        expandedLabel: null,
+        summaries: EMPTY_SUMMARIES,
+        error: true,
+      });
     } finally {
       if (requestId === requestIdRef.current) loadingRef.current = false;
     }
@@ -106,6 +162,8 @@ export default function SearchPage() {
         : "done";
   const papers = !debounced || isStale ? EMPTY_PAPERS : result.papers;
   const nextPage = !debounced || isStale ? null : result.nextPage;
+  const expandedLabel = !debounced || isStale ? null : result.expandedLabel;
+  const knownSummaries = !debounced || isStale ? EMPTY_SUMMARIES : result.summaries;
 
   // Muat halaman berikutnya saat sentinel terlihat.
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -138,7 +196,7 @@ export default function SearchPage() {
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Cari topik, metode, atau kata kunci…"
+            placeholder="Cari topik, pertanyaan, atau kata kunci…"
             aria-label="Cari paper"
             className="min-w-0 flex-1 bg-transparent font-ui text-[14px] text-on-d outline-none placeholder:text-on-d3 [&::-webkit-search-cancel-button]:hidden"
           />
@@ -159,7 +217,21 @@ export default function SearchPage() {
         {status === "idle" ? (
           <EmptyState
             title="Cari apa pun yang lagi kamu pikirin."
-            hint="Hasilnya diambil dari paper open access terbaru di OpenAlex."
+            hint="Boleh pakai bahasa sehari-hari — paper berbahasa Inggrisnya ikut kami carikan."
+            action={
+              <div className="flex max-w-[20rem] flex-wrap justify-center gap-2">
+                {examplesFor(savedTopics).map((example) => (
+                  <button
+                    key={example}
+                    type="button"
+                    onClick={() => setQuery(example)}
+                    className="rounded-full border border-desk-line px-3.5 py-1.5 font-ui text-[13px] text-on-d2 transition-colors hover:border-desk-3 hover:text-on-d"
+                  >
+                    {example}
+                  </button>
+                ))}
+              </div>
+            }
           />
         ) : status === "loading" ? (
           <div className="flex flex-col gap-3.5">
@@ -202,15 +274,24 @@ export default function SearchPage() {
             }
           />
         ) : (
-          <PaperList
-            papers={papers}
-            empty={
-              <EmptyState
-                title={`Nggak ada yang cocok buat “${debounced}”.`}
-                hint="Coba kata kunci yang lebih umum, atau pakai istilah bahasa Inggris — sebagian besar paper ditulis dalam bahasa itu."
-              />
-            }
-          />
+          <>
+            {expandedLabel && papers.length > 0 && (
+              <p className="mb-3 px-1 font-ui text-[12.5px] leading-relaxed text-on-d3">
+                Termasuk paper berbahasa Inggris untuk{" "}
+                <span className="text-on-d2">“{expandedLabel}”</span>
+              </p>
+            )}
+            <PaperList
+              papers={papers}
+              knownSummaries={knownSummaries}
+              empty={
+                <EmptyState
+                  title={`Nggak ada yang cocok buat “${debounced}”.`}
+                  hint="Coba kata kunci yang lebih umum, atau ceritakan dengan kalimat yang berbeda."
+                />
+              }
+            />
+          </>
         )}
 
         <div ref={sentinelRef} className="h-px" aria-hidden="true" />

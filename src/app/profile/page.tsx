@@ -11,8 +11,9 @@ import {
   useIsHydrated,
   useLocalStorage,
 } from "@/hooks/useLocalStorage";
-import { useReadHistory, useSavedPapers } from "@/hooks/usePaperCollections";
-import { TOPICS, TOPIC_DOT_COLOR } from "@/lib/topics";
+import { useReadHistory, useSavedPapers, useTopicAffinity } from "@/hooks/usePaperCollections";
+import { leadingTopic } from "@/lib/affinity";
+import { FOR_YOU, TOPICS, TOPIC_DOT_COLOR } from "@/lib/topics";
 import type { TopicName } from "@/types";
 
 const MIN_TOPICS = 3;
@@ -31,12 +32,14 @@ export default function ProfilePage() {
   );
   const { saved } = useSavedPapers();
   const { history } = useReadHistory();
+  const { affinity } = useTopicAffinity();
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<TopicName[]>([]);
   const [confirmingReset, setConfirmingReset] = useState(false);
 
   const current = topics.length > 0 ? topics : TOPICS;
+  const favorite = leadingTopic(current, affinity, saved);
 
   function startEditing() {
     setDraft(current);
@@ -98,6 +101,26 @@ export default function ProfilePage() {
             <span className="inline-block h-5 w-56 animate-pulse rounded bg-desk-3" />
           )}
         </p>
+
+        {/*
+          Personalisasi yang bisa dijelaskan: user berhak tahu kenapa feed-nya
+          condong ke satu topik. Hanya muncul kalau satu topik benar-benar
+          menonjol (lib/affinity.ts, leadingTopic).
+        */}
+        {hydrated && favorite && (
+          <p className="mt-3 flex items-baseline gap-2 font-ui text-[13px] leading-relaxed text-on-d3">
+            <span
+              className="size-[6px] shrink-0 translate-y-[-1px] rounded-full"
+              style={{ backgroundColor: TOPIC_DOT_COLOR[favorite] }}
+              aria-hidden="true"
+            />
+            <span>
+              Feed {FOR_YOU} paling sering menampilkan{" "}
+              <span className="text-on-d2">{favorite}</span>, karena topik itu yang paling
+              sering kamu buka dan simpan.
+            </span>
+          </p>
+        )}
 
         <section className="mt-9">
           <div className="flex items-baseline justify-between gap-3">
@@ -185,10 +208,10 @@ export default function ProfilePage() {
             Data lokal
           </h2>
           {/*
-            Klaim lama "tidak pernah dikirim ke mana pun" tidak akurat: riwayat
-            baca ikut terkirim ke /api/feed (sebagai `exclude`, supaya paper
-            yang sudah dibaca tidak muncul lagi), dan ada penghitung metrik
-            anonim. Kalimat ini hanya menjanjikan yang memang benar.
+            Kalimat ini hanya menjanjikan yang memang benar. Riwayat baca dan
+            bobot topik tidak pernah dikirim ke server (disaring di browser,
+            lihat hooks/useFeed.ts), tapi ada penghitung metrik anonim, dan
+            server tentu melihat paper mana yang diminta ringkasannya.
           */}
           <p className="mt-2 font-ui text-[13px] leading-relaxed text-on-d3">
             Bookmark, riwayat, dan preferensi kamu disimpan di browser ini — tidak

@@ -21,10 +21,26 @@ const MIN_PUBLICATION_YEAR = 2022;
 export const PAGE_SIZE = 20;
 
 /**
- * Ambil lebih banyak kandidat daripada yang dikembalikan, supaya masih tersisa
- * cukup paper setelah `exclude` (read history) membuang sebagian.
+ * Jumlah paper per halaman feed. Lebih dari 20 kartu yang ditampilkan per
+ * batch: riwayat baca sekarang disaring di browser (lihat hooks/useFeed.ts),
+ * jadi server mengirim sedikit cadangan untuk paper yang akan terbuang.
  */
-const CANDIDATE_SIZE = 25;
+const FEED_PAGE_SIZE = 25;
+
+/**
+ * Mode Fokus = dua aliran yang digabung per halaman:
+ * - "berpengaruh": sitasi terbanyak sejak 2022
+ * - "baru naik"  : terbit tahun lalu atau tahun ini, diurut sitasi
+ *
+ * Tanpa aliran kedua, paper yang benar-benar baru hampir tidak pernah muncul:
+ * re-rank 60/40 hanya bekerja di dalam satu halaman, dan halaman urutan sitasi
+ * sudah diisi paper lama yang sitasinya ribuan.
+ */
+const FOKUS_ESTABLISHED_SIZE = 15;
+const FOKUS_RISING_SIZE = 10;
+
+/** Pemisah dua cursor di dalam satu cursor Fokus. Tidak ada di alfabet base64. */
+const CURSOR_SEPARATOR = "~";
 
 /** Batas maksimum `sample` OpenAlex — terverifikasi live (>10.000 ditolak). */
 const MAX_SAMPLE = 10_000;
@@ -120,10 +136,10 @@ async function fetchOpenAlex(url: string): Promise<OpenAlexResponse> {
   }
 
   if (!response.ok) {
-    throw new OpenAlexError(
-      `OpenAlex membalas ${response.status}`,
-      response.status === 404 ? 404 : 502,
-    );
+    // 429 diteruskan apa adanya: itu batas kecepatan (±10 request/detik tanpa
+    // API key), kondisi sementara yang pemanggil bisa tunggu — bukan error.
+    const status = response.status === 404 || response.status === 429 ? response.status : 502;
+    throw new OpenAlexError(`OpenAlex membalas ${response.status}`, status);
   }
 
   const data = (await response.json()) as OpenAlexResponse;
@@ -189,16 +205,30 @@ function buildFilter(topic: TopicName | null, { forFeed }: { forFeed: boolean })
   // tanpa referensi yang ter-parse, dan filter ini akan membuang mereka.
   if (forFeed) parts.push("referenced_works_count:>0");
 
+  // Hanya versi terbitan jurnal/konferensi. Paper lama yang diunggah ulang ke
+  // repositori mendapat DOI & tahun baru dan membawa seluruh sitasinya —
+  // terverifikasi live: "Learning Multiple Layers of Features from Tiny
+  // Images" (2009) muncul sebagai paper 2024 di puncak feed AI, begitu juga
+  // Kaldi (2011). Filter ini membuang keduanya dan hanya mengurangi <1% paper.
+  if (forFeed) parts.push("primary_location.source.type:journal|conference");
+
   return parts.join(",");
+}
+
+/** Filter aliran "baru naik": sama dengan feed, tapi hanya tahun lalu dan tahun ini. */
+function risingFilter(topic: TopicName | null): string {
+  const fromYear = new Date().getUTCFullYear() - 1;
+  return buildFilter(topic, { forFeed: true }).replace(
+    `publication_year:>${MIN_PUBLICATION_YEAR - 1}`,
+    `publication_year:>${fromYear - 1}`,
+  );
 }
 
 export interface FeedParams {
   topic: TopicName | null;
   mode: FeedMode;
-  /** Cursor OpenAlex (mode fokus) atau nomor halaman (mode explore). */
+  /** Cursor Fokus (dua cursor OpenAlex digabung) atau nomor halaman (Explore). */
   cursor?: string;
-  /** paper_id yang sudah dibaca dan tidak boleh muncul lagi. */
-  exclude?: string[];
   /** Seed acak mode explore, supaya paginasi konsisten antar request. */
   seed?: number;
 }
@@ -212,18 +242,19 @@ export interface FeedResult {
 /**
  * Ambil satu halaman feed.
  *
- * Mode fokus  : sort cited_by_count:desc + cursor pagination, lalu re-rank
- *               seimbang di dalam batch.
+ * Tidak ada lagi penyaringan riwayat baca di sini: hasil untuk topik+mode+cursor
+ * yang sama identik untuk semua orang, jadi bisa disajikan dari CDN. Riwayat
+ * baca disaring di browser dan tidak pernah meninggalkan perangkat user.
+ *
+ * Mode fokus  : dua aliran (berpengaruh + baru naik) diselang-seling. Aliran
+ *               berpengaruh tetap di-re-rank seimbang 60/40 seperti SPEC.
  * Mode explore: sample + seed acak untuk serendipity. `sample` TIDAK
  *               kompatibel dengan cursor (terverifikasi live: next_cursor
  *               selalu null dan cursor-nya ditolak), jadi paginasinya memakai
- *               nomor halaman biasa. Hasil sample sudah acak — tidak di-re-rank
- *               supaya keacakannya tidak dirusak.
+ *               nomor halaman biasa. Tidak di-re-rank supaya keacakannya utuh.
  */
 export async function fetchFeed(params: FeedParams): Promise<FeedResult> {
-  const { topic, mode, exclude = [], cursor } = params;
-  const filter = buildFilter(topic, { forFeed: true });
-  const excluded = new Set(exclude);
+  const { topic, mode, cursor } = params;
 
   if (mode === "explore") {
     const seed = params.seed ?? Math.floor(Math.random() * 1_000_000);
@@ -231,24 +262,23 @@ export async function fetchFeed(params: FeedParams): Promise<FeedResult> {
 
     const data = await fetchOpenAlex(
       buildUrl("/works", {
-        filter,
+        filter: buildFilter(topic, { forFeed: true }),
         select: FEED_SELECT,
         sample: MAX_SAMPLE,
         seed,
         page,
-        "per-page": CANDIDATE_SIZE,
+        "per-page": FEED_PAGE_SIZE,
       }),
     );
 
     const papers = (data.results ?? [])
       .map(normalizeWork)
-      .filter((p): p is Paper => p !== null && !excluded.has(p.id))
-      .slice(0, PAGE_SIZE);
+      .filter((p): p is Paper => p !== null);
 
     // Sample punya batas 10.000 hasil; berhenti kalau halaman sudah habis
     // atau kalau OpenAlex mengembalikan kurang dari yang diminta.
     const exhausted =
-      (data.results?.length ?? 0) < CANDIDATE_SIZE || page * CANDIDATE_SIZE >= MAX_SAMPLE;
+      (data.results?.length ?? 0) < FEED_PAGE_SIZE || page * FEED_PAGE_SIZE >= MAX_SAMPLE;
 
     return {
       papers,
@@ -257,29 +287,74 @@ export async function fetchFeed(params: FeedParams): Promise<FeedResult> {
     };
   }
 
-  const data = await fetchOpenAlex(
-    buildUrl("/works", {
-      filter,
-      select: FEED_SELECT,
-      sort: "cited_by_count:desc",
-      cursor: cursor || "*",
-      "per-page": CANDIDATE_SIZE,
-    }),
+  // Cursor Fokus berbentuk "<berpengaruh>~<baru naik>". Bagian kosong berarti
+  // aliran itu sudah habis. Cursor tanpa pemisah (dari versi app sebelumnya)
+  // diperlakukan sebagai aliran berpengaruh saja.
+  const [establishedCursor = "*", risingCursor = cursor ? "" : "*"] = (cursor ?? "*~*").split(
+    CURSOR_SEPARATOR,
   );
 
-  const candidates = (data.results ?? [])
-    .map(normalizeWork)
-    .filter((p): p is Paper => p !== null && !excluded.has(p.id));
-
-  const papers = rerankBalanced(candidates).slice(0, PAGE_SIZE);
-  const nextCursor = data.meta?.next_cursor ?? null;
-
-  return {
-    papers,
-    // OpenAlex mengembalikan cursor yang sama saat hasil sudah habis; hentikan
-    // paginasi supaya infinite scroll di client tidak berputar selamanya.
-    nextCursor: data.results?.length ? nextCursor : null,
+  const fetchStream = async (filter: string, streamCursor: string, size: number) => {
+    if (!streamCursor) return { papers: [] as Paper[], next: "" };
+    const data = await fetchOpenAlex(
+      buildUrl("/works", {
+        filter,
+        select: FEED_SELECT,
+        sort: "cited_by_count:desc",
+        cursor: streamCursor,
+        "per-page": size,
+      }),
+    );
+    const results = data.results ?? [];
+    return {
+      papers: results.map(normalizeWork).filter((p): p is Paper => p !== null),
+      // OpenAlex mengembalikan cursor yang sama saat hasil sudah habis; tandai
+      // habis supaya infinite scroll di client tidak berputar selamanya.
+      next: results.length < size ? "" : (data.meta?.next_cursor ?? ""),
+    };
   };
+
+  const [established, rising] = await Promise.all([
+    fetchStream(buildFilter(topic, { forFeed: true }), establishedCursor, FOKUS_ESTABLISHED_SIZE),
+    fetchStream(risingFilter(topic), risingCursor, FOKUS_RISING_SIZE),
+  ]);
+
+  const bothDone = !established.next && !rising.next;
+  return {
+    papers: interleave(rerankBalanced(established.papers), rising.papers),
+    nextCursor: bothDone ? null : `${established.next}${CURSOR_SEPARATOR}${rising.next}`,
+  };
+}
+
+/**
+ * Selang-seling dua aliran sesuai proporsinya (15:10 → pola 3:2), dan buang
+ * duplikat — paper baru yang sitasinya sudah tinggi bisa ada di keduanya.
+ *
+ * Sengaja TIDAK me-re-rank gabungannya: dengan rumus 60/40, seluruh paper
+ * aliran "baru naik" menang skor kebaruan dan menggumpal di atas, lalu paper
+ * berpengaruh menumpuk di bawah (terverifikasi: 10 paper 2025 berturut-turut).
+ * Selang-seling membuat keduanya terasa bercampur di sepanjang feed.
+ */
+function interleave(established: Paper[], rising: Paper[]): Paper[] {
+  const ratio = FOKUS_ESTABLISHED_SIZE / FOKUS_RISING_SIZE;
+  const seen = new Set<string>();
+  const result: Paper[] = [];
+  const push = (paper: Paper | undefined) => {
+    if (paper && !seen.has(paper.id)) {
+      seen.add(paper.id);
+      result.push(paper);
+    }
+  };
+
+  let e = 0;
+  let r = 0;
+  while (e < established.length || r < rising.length) {
+    // Ambil dari aliran yang paling "tertinggal" dari proporsinya.
+    const takeEstablished =
+      r >= rising.length || (e < established.length && e <= r * ratio);
+    push(takeEstablished ? established[e++] : rising[r++]);
+  }
+  return result;
 }
 
 export interface SearchResult {

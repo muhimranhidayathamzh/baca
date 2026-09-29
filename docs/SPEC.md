@@ -91,25 +91,56 @@
 > **Aturan turunan:** elemen di atas lipatan yang mungkin jadi LCP TIDAK BOLEH
 > memakai animasi masuk Framer Motion (`initial={{ opacity: 0 }}`). Pakai CSS
 > murni (`.enter-fade-up` di globals.css) yang jalan sejak paint pertama.
+>
+> **Aturan turunan 2 (29 September 2026):** animasi yang memaksa teks di-*repaint*
+> (mis. `background-size` pada coretan amber) membuat Chrome menghitung teks itu
+> sebagai LCP pada saat animasinya berjalan. Coretan "digores seperti pulpen" di
+> kartu feed karena itu hanya diputar untuk hook yang tiba SETELAH interaksi
+> pertama user (`lib/first-interaction.ts`) — Chrome berhenti mengukur LCP sejak
+> interaksi pertama. Di reader selalu diputar (dibuka lewat ketukan).
+>
+> **Ukur ulang setelah perubahan FYP/search (29 September 2026), build produksi,
+> throttling nyata, localhost.** Hari itu mesin ukur lebih lambat daripada saat
+> audit: versi SEBELUM perubahan pun hanya mendapat 67–90 di `/feed` (dulu 92).
+> Karena itu `/feed` dibandingkan A/B dengan versi sebelumnya, bergantian:
+>
+> | Halaman | Performance | LCP | CLS | Catatan |
+> |---|---|---|---|---|
+> | /feed (sebelum) | 89–90 | 3,2–3,5 s | 0 | 6 request `/api/summarize` di layar pertama |
+> | /feed (sesudah) | 84–90 | 3,4–4,2 s | 0 | **0** request `/api/summarize` — hook ikut feed |
+> | /onboarding | 98 | 1,0 s | 0 | |
+> | /search | 97 | 1,1 s | 0 | |
+> | /profile | 95 | 1,2 s | 0 | |
+> | /saved | 91 | 3,1 s | 0 | |
+>
+> Dua regresi ditemukan dan diperbaiki selama pengukuran: (1) "Untukmu" dengan
+> 6 topik menunggu dua gelombang fetch sebelum menampilkan apa pun (LCP +0,8 s)
+> → sekarang satu gelombang per batch; (2) coretan amber membuat hook dihitung
+> LCP (5,0 s) → aturan turunan 2. Angka yang mengikat tetap PageSpeed Insights
+> di URL produksi (Bagian 11).
 
 ### Arsitektur Alur Data
 ```
 [Browser]
     │
-    ├── GET /api/feed?topic=X&mode=fokus
+    ├── GET /api/feed?topic=X&mode=fokus        (satu request per topik)
     │       │
-    │       ├── Fetch dari OpenAlex (server-side, proxy)
-    │       ├── Re-rank seimbang (60% recency + 40% citations)
-    │       └── Return paper list ke client
+    │       ├── [CDN Vercel] halaman ini sudah pernah diminta? → dari edge
+    │       ├── Fokus: 2 aliran OpenAlex paralel (berpengaruh + baru naik),
+    │       │         diselang-seling 3:2
+    │       ├── Explore: sample + seed acak
+    │       ├── MGET Redis: ringkasan yang sudah ada ikut dikirim
+    │       └── Return paper list (riwayat baca disaring DI BROWSER)
     │
-    ├── GET /api/summarize?paper_id=W123
+    ├── GET /api/summarize?paper_id=W123&v=3
     │       │
     │       ├── [CDN Vercel] ringkasan sudah pernah dibuat? → langsung dari edge
-    │       ├── Cek cache Redis (paper_id)
+    │       ├── Cek cache Redis (paper_id + versi prompt)
     │       ├── Kalau ada → return cached summary
-    │       ├── Kalau belum → cek jatah AI harian global
-    │       │       └── Habis → fallback (tidak di-cache)
-    │       ├── Panggil Gemini API
+    │       ├── Kalau belum → jatah AI global: per menit, lalu per hari
+    │       │       ├── Menit ini penuh → 503 + retryAfter (kartu menunggu)
+    │       │       └── Hari ini habis → 503 tanpa retryAfter (kartu pakai judul)
+    │       ├── Panggil Gemini API (429 Gemini → 503 + retryAfter)
     │       │       ├── Generate: hook, key, quick (3), deep
     │       │       └── Semua dalam Bahasa Indonesia
     │       ├── Simpan hasil ke Redis (180 hari)
@@ -117,7 +148,9 @@
     │
     ├── GET /api/search?q=keyword
     │       │
-    │       ├── Fetch dari OpenAlex search endpoint
+    │       ├── Perluas query → bahasa Inggris boolean (Gemini, cache 30 hari)
+    │       ├── 2 search OpenAlex paralel: query asli + versi Inggris
+    │       ├── Gabung 2:1 (Inggris : asli) + ringkasan yang sudah ada
     │       └── Return hasil ke client
     │
     └── POST /api/event  (metrik anonim, lewat sendBeacon)
@@ -126,38 +159,63 @@
 ### API Routes (Next.js)
 
 **`GET /api/feed`**
-- Query params: `topic` (string), `mode` ("fokus" | "explore"), `cursor` (string, opsional), `exclude` (string, opsional — comma-separated paper_id dari read_history client)
-- Fokus: filter 2022+, is_oa:true, type:article, has_abstract:true, referenced_works_count:>0, sort cited_by_count:desc, re-rank balanced
-  (filter `referenced_works_count:>0` hanya untuk feed, bukan search — lihat Bagian 6)
-- Explore: filter sama, tapi pakai `sample=` + random seed (parameter `seed` dikirim balik ke client)
-- Paper yang ada di `exclude` dibuang dari hasil (mencegah feed ngulang paper yang sama).
-  Dibatasi 100 id terakhir supaya URL tidak meledak seiring read_history tumbuh
-- Paginasi: **cursor OpenAlex untuk mode Fokus, nomor halaman untuk mode Explore**
+- Query params: `topic` (string), `mode` ("fokus" | "explore"), `cursor` (string, opsional), `seed` (number, opsional — explore)
+- Filter feed: 2022+, is_oa:true, type:article, has_abstract:true, referenced_works_count:>0,
+  primary_location.source.type:journal|conference (dua yang terakhir hanya untuk feed — Bagian 6)
+- **Fokus = dua aliran OpenAlex paralel**, masing-masing sort cited_by_count:desc:
+  "berpengaruh" (2022+, 15 paper, di-re-rank seimbang) dan "baru naik" (tahun lalu
+  + tahun ini, 10 paper). Keduanya diselang-seling 3:2. Cursor-nya gabungan dua
+  cursor OpenAlex, dipisah `~` (bagian kosong = aliran itu habis)
+- Explore: `sample=` + random seed (`seed` dikirim balik ke client)
+- Paginasi: **cursor untuk Fokus, nomor halaman untuk Explore**
   (`sample` tidak kompatibel dengan cursor — lihat Bagian 6 "Hasil verifikasi filter")
-- Diambil 25 kandidat per request lalu dikembalikan maks 20, supaya masih tersisa
-  cukup paper setelah `exclude` membuang sebagian
+- Return: `{ papers (25 per halaman), nextCursor, seed?, summaries }` — `summaries`
+  berisi ringkasan yang sudah ada di cache Redis untuk paper di halaman itu
+  (satu MGET), jadi kartu-kartu itu tidak perlu memanggil `/api/summarize`
+- **Riwayat baca TIDAK dikirim ke server** (dulu parameter `exclude`). Disaring di
+  browser (`hooks/useFeed.ts`). Hasilnya: URL sama untuk semua orang sehingga
+  bisa di-cache CDN, dan riwayat baca tidak pernah meninggalkan perangkat
+- **Cache-Control:** `public, max-age=0, s-maxage=1800, stale-while-revalidate=86400`;
+  halaman pertama Explore tanpa seed `private, max-age=0` (seed acaknya dipilih
+  server, jangan sampai semua orang mendapat "acak" yang sama); error `no-store`
+- OpenAlex 429 (batas kecepatan) → 503 + `Retry-After`
 - Rate limit: max 60 request/menit per IP
-- Return: array of paper objects (max 20 per page) + next_cursor
 - Abstrak **tidak pernah** ikut dikirim ke client — hanya dipakai server-side di
   `/api/summarize`
+
+> **Diubah setelah Fase 5** (persetujuan pemilik proyek, 29 September 2026):
+> `exclude` dihapus, Fokus jadi dua aliran, respons membawa `summaries`.
+> Feed "Untukmu" di client memanggil endpoint ini sekali per topik, paling
+> banyak 3 topik per putaran — satu halaman Fokus = 2 request OpenAlex, dan
+> 12 request serentak (6 topik) terbukti ditolak batas kecepatan OpenAlex.
 
 **`GET /api/summarize?paper_id=W123`**
 - Satu-satunya input: `paper_id`. Client TIDAK BOLEH kirim abstrak (mencegah endpoint dibajak jadi proxy AI). Parameter lain apa pun diabaikan; POST ditolak 405
 - Server fetch abstrak langsung dari OpenAlex berdasarkan paper_id
 - Cek cache Redis dulu (cache hit → return langsung)
-- Kalau miss: cek jatah AI harian global (`AI_DAILY_LIMIT`, default 1000), lalu panggil Gemini API dengan prompt terdefinisi (lihat Bagian 5)
+- Kalau miss: cek jatah AI global — **per menit** (`AI_RPM_LIMIT`, default 12) lalu **per hari** (`AI_DAILY_LIMIT`, default 1000) — lalu panggil Gemini API dengan prompt terdefinisi (lihat Bagian 5)
+- Parameter `v` (versi prompt, `lib/summary-version.ts`) diabaikan server; gunanya
+  membuat URL berganti setiap prompt diperbaiki, supaya CDN tidak menyajikan
+  ringkasan versi lama selama 30 hari
 - Rate limit: max 30 request/menit per IP (Upstash Ratelimit)
 - **Cache-Control:**
-  - Ringkasan sukses (dan fallback karena abstrak kosong, yang hasilnya tidak akan berubah): `public, max-age=86400, s-maxage=2592000, stale-while-revalidate=604800`
-  - Fallback karena AI gagal / jatah habis, semua error, dan 429: `no-store` — supaya permintaan berikutnya mencoba lagi, bukan menerima fallback basi 30 hari
+  - Ringkasan sukses (dan ringkasan "tanpa abstrak", yang hasilnya tidak akan berubah): `public, max-age=86400, s-maxage=2592000, stale-while-revalidate=604800`
+  - Semua error, 503, dan 429: `no-store`
 - Error handling:
   - Paper_id tidak ditemukan di OpenAlex → return 404 `{ error: "Paper not found" }`
-  - Abstrak kosong/null → return 200 dengan `{ hook: title, key: null, quick: ["Abstrak tidak tersedia."], deep: "Buka paper asli untuk membaca." }` (graceful fallback, JANGAN panggil AI)
-  - Gemini API return invalid JSON → retry 1x, kalau tetap gagal → return fallback seperti abstrak kosong + log error
-  - Gemini API timeout/down → return fallback + log error
-  - Jatah AI harian habis → return fallback + log warning
-  - Rate limit exceeded → return 429 `{ error: "Too many requests" }`
+  - Abstrak kosong/null → return 200 dengan `{ hook: title, key: null, quick: ["Paper ini tidak menyertakan abstrak, jadi belum bisa diringkas."], deep: "Buka paper asli untuk membaca isinya." }` (JANGAN panggil AI)
+  - **Sementara tidak bisa** (jatah per menit penuh, Gemini 429, OpenAlex 429) → **503 `{ error: "busy", retryAfter }` + header `Retry-After`**. Kartu tetap shimmer, seluruh antrean client berhenti sejenak, lalu kartu dicoba lagi (maks 4 kali)
+  - **Tidak bisa** (jatah harian habis, output model tetap tidak valid setelah retry 1x, Gemini error lain) → **503 `{ error: "unavailable", retryAfter: null }`**. Kartu menampilkan judul asli; reader menampilkan tombol "Coba lagi"
+  - Rate limit per-IP → 429 `{ error: "Too many requests" }` + `Retry-After` berisi jeda sebenarnya dari Upstash; client memperlakukannya seperti "busy"
 - Return: `{ hook, key, quick[], deep }`
+
+> **Diubah setelah Fase 5 (29 September 2026).** Dulu semua kegagalan AI
+> membalas 200 dengan fallback "Abstrak tidak tersedia." — padahal feed hanya
+> berisi paper yang PUNYA abstrak. Uji scroll cepat: 4 dari 20 kartu gagal,
+> semuanya karena kuota gratis Gemini **15 request/menit per model**
+> (`GenerateRequestsPerMinutePerProjectPerModel-FreeTier`), dan retry langsung
+> di server hanya membakar kuota berikutnya. Setelah perubahan: 20 request
+> serentak → 12 berhasil, 8 disuruh menunggu, **0 gagal, 0 penolakan dari Gemini**.
 
 > **Kenapa ada batas harian global.** Rate limit per-IP (30/menit) tidak
 > membatasi *total*: beberapa IP sudah cukup untuk menghabiskan kuota Gemini
@@ -167,9 +225,20 @@
 
 **`GET /api/search`**
 - Query params: `q` (string), `page` (number, opsional)
-- Proxy ke OpenAlex search
+- **Perluasan query lintas bahasa** (`lib/query-expand.ts`): Gemini menerjemahkan
+  MAKSUD query ke query boolean bahasa Inggris ("kenapa susah tidur" → insomnia,
+  "pertanian padi" → `(rice OR paddy) AND (farming OR cultivation)`). Hasilnya
+  di-cache Redis 30 hari per query dan berbagi jatah AI dengan ringkasan; kalau
+  jatah penuh, search tetap jalan dengan query asli saja
+- Dua search OpenAlex paralel (query asli + versi Inggris), digabung 2:1 mulai
+  dari versi Inggris. Query asli tetap dipakai karena memunculkan jurnal lokal
 - Rate limit: max 60 request/menit per IP
-- Return: array of paper objects + `nextPage`
+- Return: `{ papers, nextPage, expandedLabel, summaries }` — `expandedLabel` terjemahan
+  ringkas yang ditampilkan ke user ("Termasuk paper berbahasa Inggris untuk “insomnia”")
+- Cache-Control `public, s-maxage=3600`, kecuali saat perluasan query tidak
+  tersedia (`no-store`, supaya hasil tanpa versi Inggris tidak menempel di CDN)
+- **Biaya:** satu search OpenAlex = 10 kredit (feed = 1), jadi satu halaman
+  search sekarang 20 kredit — lihat Bagian 11 soal `OPENALEX_API_KEY`
 
 **`POST /api/event`**
 - Body: `{ event, device }` — `event` salah satu dari `paper_opened` / `original_paper_opened`, `device` UUID acak dari localStorage (`baca_device`)
@@ -195,8 +264,10 @@ Menggantikan tabel Supabase `summaries` (lihat "Audit arsitektur" di atas).
 Semua kunci berawalan `baca:` supaya database bisa dipakai bersama.
 
 ```
-baca:summary:<paper_id>              JSON { hook, key, quick[], deep }   TTL 180 hari
+baca:summary:v<versi>:<paper_id>     JSON { hook, key, quick[], deep }   TTL 180 hari
 baca:ai-budget:<YYYY-MM-DD>          angka (INCR)                         TTL 48 jam
+baca:ai-rpm:*                        jatah AI per menit (@upstash/ratelimit, global)
+baca:qx:v1:<sha256 query>            JSON { query, label } | "unchanged"  TTL 30 hari
 baca:m:count:<event>:<YYYY-MM-DD>    angka (INCR)                         TTL 120 hari
 baca:m:wcount:<event>:<YYYY-Www>     angka (INCR)                         TTL 120 hari
 baca:m:devices:<event>:<YYYY-Www>    HyperLogLog (PFADD) perangkat unik   TTL 120 hari
@@ -218,8 +289,9 @@ baca_onboarded       : boolean   — sudah onboarding atau belum
 baca_topics          : string[]  — topik pilihan user
 baca_mode            : string    — "fokus" | "explore"
 baca_saved           : object[]  — array paper yang di-bookmark
-baca_read_history    : string[]  — array paper_id yang sudah dibaca (maks 200)
-baca_active_topic    : string    — chip topik yang sedang aktif di feed
+baca_read_history    : string[]  — paper_id yang sudah dibaca (maks 500) — TIDAK dikirim ke server
+baca_active_topic    : string    — chip aktif di feed: nama topik, atau "Untukmu"
+baca_affinity        : object    — jumlah paper dibuka per topik, mis. {"AI": 12} — bobot "Untukmu"
 baca_device          : string    — UUID acak untuk metrik anonim (terhapus oleh Reset)
 ```
 
@@ -399,7 +471,7 @@ Ekonomi:    #C4884D
 
 ### 4.2 Feed Utama (halaman Home)
 - **Layout:** card scroll vertikal (2-4 kartu terlihat sekaligus)
-- **Chip filter** di atas: filter per topik berdasarkan pilihan onboarding
+- **Chip filter** di atas: **"Untukmu"** (default) lalu satu chip per topik pilihan onboarding
 - **Toggle Fokus/Explore** di header:
   - Fokus = paper dari topik yang dipilih, diurut seimbang
   - Explore = paper acak dari field yang sama (v1 serendipity)
@@ -407,7 +479,7 @@ Ekonomi:    #C4884D
   - Titik warna topik + label topik (uppercase, kecil)
   - Hook (pertanyaan pendek, ada frasa di-underline amber)
   - Judul asli paper (italic, serif)
-  - Estimasi waktu baca + venue/tahun
+  - Sitasi ringkas + tahun + venue ("25 rb sitasi · 2024 · Nature"); paper tahun berjalan diberi penanda amber **Baru**
   - Icon bookmark + share
 - **Progressive loading:** kartu muncul dengan shimmer, hook + summary muncul setelah AI memproses
   - Summarize HANYA kartu yang mendekati viewport (IntersectionObserver, rootMargin ~400px)
@@ -415,6 +487,29 @@ Ekonomi:    #C4884D
   - Kartu di luar viewport tidak diproses = hemat biaya + kerasa lebih cepat
 - **Infinite scroll / load more:** load 20 paper per batch, cursor pagination
 - **De-dup:** paper yang sudah ada di read_history tidak dimunculkan lagi di feed
+  (disaring di browser saat batch diambil, bukan di server)
+
+> **Feed "Untukmu" (ditambahkan setelah Fase 5, 29 September 2026).** Satu
+> aliran per topik pilihan, digabung dengan *smooth weighted round-robin*,
+> jadi topik tersebar merata di sepanjang feed (terverifikasi: Kesehatan > AI >
+> Neurosains > Kesehatan > …), bukan berblok. Bobot topik =
+> `1 + (dibuka + 3 × disimpan) / 10`, dibatasi 1–4 (`lib/affinity.ts`):
+> minimum 1 supaya topik yang jarang dibuka tetap muncul (feed tidak menyempit
+> ke satu kebiasaan), maksimum 4 supaya topik favorit paling banyak 4× porsi
+> topik lain. Seluruh sinyalnya di localStorage — tidak ada yang dikirim ke
+> server. Profil menjelaskannya dalam satu kalimat ("Feed Untukmu paling
+> sering menampilkan Neurosains, karena…") saat satu topik cukup menonjol.
+> Per putaran paling banyak 3 aliran yang diambil, supaya kartu pertama untuk
+> user 6 topik tampil secepat feed satu topik; topik sisanya menyusul di batch
+> berikutnya.
+>
+> **Meta kartu** dulu diawali estimasi waktu baca, tapi karena dihitung dari
+> abstrak yang panjangnya mirip-mirip, hampir semua kartu menampilkan "1 mnt".
+> Diganti sitasi, yang memberi sinyal sungguhan.
+>
+> **Kartu yang ringkasannya gagal** menampilkan judul asli sebagai headline
+> (dulu: shimmer selamanya). **Kartu yang ringkasannya sudah terkirim bersama
+> feed** tampil langsung dengan hook-nya, tanpa fade.
 
 > **Terverifikasi di browser (Fase 3, 27 Agustus 2026):** 40 kartu dimuat lewat
 > infinite scroll, hanya 23 yang diringkas (kartu di luar viewport tidak
@@ -437,14 +532,18 @@ Ekonomi:    #C4884D
 > jadi headline serif — tidak ada judul yang tampil dua kali. Aturan yang sama
 > berlaku di kartu feed: di kondisi fallback, baris judul italic disembunyikan.
 - **Quick Take** (3 bullet, label: ⚡ Quick take · 30 detik)
-- **Deep Read** (expandable accordion, label: 📖 Deep read · X mnt)
+- **Deep Read** (expandable accordion, label: 📖 Deep read · waktu baca teks deep read itu sendiri, mis. "20 detik")
 - **Tombol "Buka paper asli"** → link ke DOI atau OpenAlex
 - **Disclaimer:** "Ringkasan otomatis — selalu cek sumber asli"
 - Tombol bookmark + share di header
 
 ### 4.4 Search (halaman Search)
 - Input field di atas
-- Ketik keyword → hit OpenAlex search endpoint
+- Ketik keyword → hit `/api/search` (query diperluas ke bahasa Inggris, lihat Bagian 2)
+- Layar kosong berisi 6 contoh pencarian dalam bahasa sehari-hari, didahulukan
+  dari topik user ("kenapa susah tidur", "mikroplastik di laut", …) — mengajarkan
+  bahwa user tidak perlu tahu istilah ilmiah atau bahasa Inggris
+- Saat query diperluas, di atas hasil tertulis "Termasuk paper berbahasa Inggris untuk “…”"
 - Hasil ditampilkan dalam format kartu yang sama
 - Tap → masuk reading view yang sama
 
@@ -528,6 +627,10 @@ akademis ini, buatkan:
    - Harus berupa pertanyaan, bukan klaim
    - Jangan clickbait atau overclaim
    - Cukup bikin penasaran, netral secara ilmiah
+   - Awali dengan kata "{opener}" kalau itu menghasilkan pertanyaan yang wajar
+     dan tetap setia pada isi abstrak. Kalau janggal, pakai kata tanya lain yang
+     paling pas.
+   - Jangan diawali nama alat, dataset, atau singkatan teknis dari judul.
 
 2. "key": satu frasa (2-4 kata) dari hook yang paling penting untuk di-highlight.
    Harus substring persis dari hook.
@@ -554,6 +657,15 @@ ABSTRAK: {abstract (maks 1500 karakter)}
 Jawab HANYA dalam format JSON valid. Tanpa markdown, tanpa backtick, tanpa penjelasan.
 ```
 
+> **Versi 3 (29 September 2026).** `{opener}` dipilih dari hash paper_id di
+> antara: Apa, Kenapa, Seberapa, Bagaimana, Apakah, Bisakah, Berapa, Benarkah,
+> Mungkinkah, Siapa. Alasannya: versi 1 menghasilkan hampir semua hook
+> "Bagaimana…"; aturan umum "variasikan pertanyaannya" (versi 2) hanya
+> memindahkan kebiasaannya ke "Benarkah…" (5 dari 8). Setiap panggilan berdiri
+> sendiri dan tidak tahu hook kartu sebelahnya, jadi saran yang berbeda per paper
+> yang menyebarkan variasi. Deterministik, supaya paper yang sama selalu mendapat
+> prompt yang sama. Setiap perubahan prompt WAJIB menaikkan `SUMMARY_VERSION`.
+
 Model: dikonfigurasi lewat env var **`GEMINI_MODEL`**, default **`gemini-3.5-flash-lite`**.
 Riwayat: draft awal menyebut `gemini-2.5-flash-preview-05-20`, lalu Fase 2 memakai
 `gemini-2.5-flash`. Per September 2026 Google membatasi akses model 2.5 hanya
@@ -577,11 +689,12 @@ lebih andal daripada hanya memintanya lewat prompt.
 > tidak cocok, `key` di-set `null` — hook tanpa underline jauh lebih baik
 > daripada underline amber yang menempel di posisi salah.
 
-> **Arsitektur provider-agnostic:** `lib/summarize.ts` mengekspos satu fungsi
-> `summarizePaper(title, abstract) → { hook, key, quick[], deep }`.
-> Di dalamnya panggil Gemini, tapi interface-nya tetap sama.
-> Untuk swap ke Claude API nanti: ganti hanya isi `lib/summarize.ts`,
-> tambah `ANTHROPIC_API_KEY` di `.env.local`, tidak ada perubahan lain.
+> **Arsitektur provider-agnostic:** satu-satunya modul yang berbicara dengan
+> provider AI adalah `lib/ai.ts` (`generateJson(prompt)`), dipakai bersama oleh
+> ringkasan (`lib/summarize.ts`) dan perluasan query search
+> (`lib/query-expand.ts`). Modul itu juga yang mengenali penolakan kuota (429)
+> dan membaca `retryDelay`-nya. Untuk swap ke Claude API nanti: ganti hanya isi
+> `lib/ai.ts`, tambah `ANTHROPIC_API_KEY` di `.env.local`.
 
 > **Catatan free tier Gemini:** Google boleh pakai input/output free tier untuk
 > improve model mereka. Karena input kita adalah abstrak paper akademis yang sudah
@@ -600,10 +713,16 @@ lebih andal daripada hanya memintanya lewat prompt.
 ### API Key
 - Daftar gratis di openalex.org/settings/api
 - Simpan di environment variable: `OPENALEX_API_KEY`
-- Budget: $1/hari (10.000 panggilan) — lebih dari cukup
+- Budget: $1/hari (10.000 kredit), gratis tanpa kartu pembayaran
+  (help.openalex.org/access/pricing, dicek 29 September 2026)
 - **Tanpa key**, app tetap jalan lewat *polite pool* (parameter `mailto`), tapi
   kuotanya hanya ~1.000 kredit/hari per IP (header `X-RateLimit-Limit: 1000`,
   `X-RateLimit-Limit-USD: 0.1`) — cukup untuk dev, tidak untuk produksi.
+- **Biaya per request (diukur dari header `X-RateLimit-Cost-USD`):** list/filter
+  (feed, termasuk `sample`) = 1 kredit, **search = 10 kredit**, ambil satu work
+  (abstrak untuk ringkasan) = 0. Satu muat awal "Untukmu" + Fokus (3 topik ×
+  2 aliran) = 6 kredit; satu halaman search lintas bahasa = 20 kredit. CDN
+  (feed 30 menit, search 1 jam) menyerap permintaan berulang.
 - **Key yang salah ditolak keras**: OpenAlex membalas `401 API key not found`.
   Karena itu `lib/openalex.ts` hanya mengirim `api_key` kalau env var-nya
   benar-benar terisi — env kosong lebih baik daripada env ngawur.
@@ -663,6 +782,15 @@ implementasi:
    terindeks tanpa referensi yang ter-parse, dan filter ini akan membuang
    mereka dari hasil pencarian.
 
+5. **Feed memakai `primary_location.source.type:journal|conference`**
+   (29 September 2026). Paper lama yang diunggah ulang ke repositori mendapat
+   DOI dan tahun baru sambil membawa seluruh sitasinya: "Learning Multiple
+   Layers of Features from Tiny Images" (2009) tampil sebagai paper **2024** di
+   puncak feed AI dengan 25 ribu sitasi, begitu juga Kaldi (2011). Filter ini
+   membuang keduanya dan hanya mengurangi <1% kandidat (CS: 603 rb → 598 rb).
+   `conference` wajib ikut — banyak paper AI terbit di prosiding. Tidak dipakai
+   di search, dengan alasan yang sama seperti poin 4.
+
 Selain itu: abstrak **masih** dikirim sebagai `abstract_inverted_index` (tidak
 ada field `abstract` polos), jadi fungsi konversi di bawah tetap dibutuhkan.
 Parameter `select=` dipakai untuk membatasi field yang diminta agar payload
@@ -676,6 +804,15 @@ score = 0.6 * recency_normalized + 0.4 * log_citations_normalized
 - log_citations_normalized: log(1 + cites) / log(1 + max_cites)
 - Filter: publication_year >= 2022, is_oa: true, type: article
 - Hanya paper yang punya abstract
+
+> **Rumus ini sekarang hanya dipakai di dalam aliran "berpengaruh" mode Fokus.**
+> Di satu halaman urutan sitasi, semua paper sudah lama dan bersitasi ribuan,
+> jadi re-rank 60/40 nyaris tidak pernah menaikkan paper baru. Karena itu
+> ditambahkan aliran "baru naik" (tahun lalu + tahun ini, diurut sitasi —
+> terverifikasi memunculkan paper 2025 seperti DeepSeek-R1). Menggabungkan dua
+> aliran lalu me-re-rank bersama dicoba dulu, tapi seluruh paper baru menang
+> skor kebaruan dan menggumpal di atas (10 paper 2025 berturut-turut), jadi
+> keduanya diselang-seling 3:2.
 
 ### Abstrak: Inverted Index → Teks
 OpenAlex mengembalikan abstrak sebagai inverted index. Harus dikonversi:
@@ -743,13 +880,19 @@ baca/
 │   │       ├── Shimmer.tsx
 │   │       ├── Toast.tsx
 │   │       ├── EmptyState.tsx
-│   │       └── HookText.tsx        # Hook + garis bawah amber, dipakai kartu & reader
+│   │       ├── HookText.tsx        # Hook + garis bawah amber, dipakai kartu & reader
+│   │       └── SaveIcon.tsx        # Ikon bookmark + animasi "cap" saat disimpan
 │   ├── lib/
 │   │   ├── openalex.ts           # OpenAlex API helpers (server-only)
-│   │   ├── summarize.ts          # AI summarization (Gemini, provider-agnostic, server-only)
+│   │   ├── ai.ts                 # SATU-SATUNYA pemanggil provider AI (Gemini), kenali 429
+│   │   ├── summarize.ts          # Prompt + validasi ringkasan (server-only)
+│   │   ├── summary-version.ts    # Versi prompt — kunci cache & parameter `v` di URL
+│   │   ├── query-expand.ts       # Perluasan query search lintas bahasa (server-only)
+│   │   ├── affinity.ts           # Bobot topik feed "Untukmu" (data lokal)
+│   │   ├── first-interaction.ts  # Penanda interaksi pertama (animasi coretan vs LCP)
 │   │   ├── redis.ts              # Klien Upstash bersama (server-only)
 │   │   ├── summary-cache.ts      # Cache ringkasan di Redis
-│   │   ├── ai-budget.ts          # Batas harian global panggilan AI
+│   │   ├── ai-budget.ts          # Jatah global panggilan AI: per menit + per hari
 │   │   ├── metrics.ts            # Penghitung metrik anonim
 │   │   ├── ratelimit.ts          # Upstash Ratelimit wrapper
 │   │   ├── analytics.ts          # Kirim event metrik (client)
@@ -829,6 +972,8 @@ UPSTASH_REDIS_REST_TOKEN=
 GEMINI_API_KEY=             # dari aistudio.google.com/apikey
 GEMINI_MODEL=               # OPSIONAL, default gemini-3.5-flash-lite
 AI_DAILY_LIMIT=             # OPSIONAL, default 1000 panggilan AI/hari untuk semua user
+AI_RPM_LIMIT=               # OPSIONAL, default 12 panggilan AI/menit untuk semua user
+                            # (free tier Gemini: 15/menit per model). Naikkan kalau billing aktif
 
 # OpenAlex
 OPENALEX_API_KEY=           # dari openalex.org/settings/api
@@ -913,11 +1058,13 @@ STATS_TOKEN=                # string acak panjang, mis. `openssl rand -hex 32`
 | `UPSTASH_REDIS_REST_URL` | **Seluruh API route balas 429.** App tampak rusak total. |
 | `UPSTASH_REDIS_REST_TOKEN` | Sama seperti di atas. |
 | `GEMINI_API_KEY` | Kartu tampil, tapi semua ringkasan jatuh ke fallback (hook = judul asli, tanpa garis bawah amber). |
-| `OPENALEX_API_KEY` | App tetap jalan lewat polite pool, tapi kuotanya hanya ~1.000 request/hari **per IP** — terlalu kecil untuk produksi. |
+| `OPENALEX_API_KEY` | App tetap jalan lewat polite pool, tapi kuotanya hanya 1.000 kredit/hari **per IP** — dan IP Vercel dipakai bersama banyak app. Dengan key gratis: 10.000 kredit/hari. Satu search = 10 kredit. |
 
 Opsional: `GEMINI_MODEL` (default `gemini-3.5-flash-lite`), `AI_DAILY_LIMIT`
 (default 1000 — sesuaikan dengan batas free tier yang tertera di
-aistudio.google.com/rate-limit), dan `STATS_TOKEN` (tanpanya `/api/stats` mati).
+aistudio.google.com/rate-limit), `AI_RPM_LIMIT` (default 12 — naikkan kalau
+billing Gemini aktif; tanpa billing, 15/menit adalah batas keras Google), dan
+`STATS_TOKEN` (tanpanya `/api/stats` mati).
 
 ### Membaca metrik
 ```

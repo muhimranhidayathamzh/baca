@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import TopicPicker from "@/components/onboarding/TopicPicker";
 import { STORAGE_KEYS, useLocalStorage } from "@/hooks/useLocalStorage";
+import { FOR_YOU, type FeedChip } from "@/lib/topics";
 import type { TopicName } from "@/types";
 
 /** Minimum topik yang harus dipilih (SPEC.md Bagian 4.1). */
@@ -24,7 +25,7 @@ export default function OnboardingPage() {
     EMPTY_TOPICS,
   );
   const { setValue: setOnboarded } = useLocalStorage<boolean>(STORAGE_KEYS.onboarded, false);
-  const { setValue: setActiveTopic } = useLocalStorage<TopicName | null>(
+  const { setValue: setActiveChip } = useLocalStorage<FeedChip | null>(
     STORAGE_KEYS.activeTopic,
     null,
   );
@@ -38,8 +39,8 @@ export default function OnboardingPage() {
   function finish() {
     if (picked.length < MIN_TOPICS) return;
     setTopics(picked);
-    // Topik pertama yang dipilih jadi default di feed (SPEC.md Bagian 4.1).
-    setActiveTopic(picked[0]!);
+    // Feed dibuka di "Untukmu" — campuran semua topik yang baru dipilih.
+    setActiveChip(FOR_YOU);
     setOnboarded(true);
     router.replace("/feed");
   }

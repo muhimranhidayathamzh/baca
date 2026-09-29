@@ -19,6 +19,14 @@ export const TOPIC_TO_FIELD: Record<TopicName, string> = {
 
 export const TOPICS = Object.keys(TOPIC_TO_FIELD) as TopicName[];
 
+/**
+ * Chip pertama di feed: campuran semua topik pilihan user, porsinya mengikuti
+ * topik yang paling sering dibuka (lib/affinity.ts). Default setelah onboarding.
+ */
+export const FOR_YOU = "Untukmu";
+
+export type FeedChip = TopicName | typeof FOR_YOU;
+
 export function isTopicName(value: string): value is TopicName {
   return value in TOPIC_TO_FIELD;
 }
@@ -63,19 +71,38 @@ export function underlineVariant(paperId: string): string {
   return UNDERLINE_VARIANTS[hash % UNDERLINE_VARIANTS.length]!;
 }
 
-/** Format meta kartu: "6 mnt · Nature · 2024". */
+const compactNumber = new Intl.NumberFormat("id-ID", {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+
+/** "25 rb sitasi", "4,9 rb sitasi", "12 sitasi" — null kalau belum dikutip. */
+export function formatCitations(citations: number): string | null {
+  return citations > 0 ? `${compactNumber.format(citations)} sitasi` : null;
+}
+
+/**
+ * Meta kartu: "25 rb sitasi · 2024 · Nature".
+ *
+ * Dulu diawali estimasi waktu baca, tapi karena dihitung dari abstrak yang
+ * panjangnya mirip-mirip, hampir semua kartu menampilkan "1 mnt" — tidak
+ * membedakan apa-apa. Sitasi memberi sinyal yang sungguhan. Venue diletakkan
+ * terakhir karena paling panjang: kalau terpotong, yang hilang ujung nama
+ * jurnal, bukan tahunnya.
+ */
 export function formatCardMeta(params: {
-  readingMinutes: number;
+  citations: number;
   venue: string | null;
   year: number | null;
 }): string {
-  return [
-    `${params.readingMinutes} mnt`,
-    params.venue,
-    params.year ? String(params.year) : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  // Paper tahun ini sudah ditandai "Baru" di kartu; tahunnya tidak diulang.
+  const year = params.year && !isNewPaper(params.year) ? String(params.year) : null;
+  return [formatCitations(params.citations), year, params.venue].filter(Boolean).join(" · ");
+}
+
+/** Paper terbitan tahun berjalan — diberi penanda "Baru" di kartu. */
+export function isNewPaper(year: number | null): boolean {
+  return year !== null && year >= new Date().getFullYear();
 }
 
 /** Format penulis: "Krizhevsky dkk." — nama belakang penulis pertama saja. */

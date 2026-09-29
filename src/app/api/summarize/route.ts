@@ -2,7 +2,7 @@ import { reserveAiCall } from "@/lib/ai-budget";
 import { OpenAlexError, fetchWorkContent, isValidWorkId, shortWorkId } from "@/lib/openalex";
 import { checkRateLimit, tooManyRequests } from "@/lib/ratelimit";
 import { cacheSummary, getCachedSummary } from "@/lib/summary-cache";
-import { fallbackSummary, summarizePaper } from "@/lib/summarize";
+import { noAbstractSummary, summarizePaper } from "@/lib/summarize";
 import type { Summary } from "@/types";
 
 /**
@@ -25,11 +25,13 @@ import type { Summary } from "@/types";
 const CACHE_SUCCESS = "public, max-age=86400, s-maxage=2592000, stale-while-revalidate=604800";
 
 /**
- * Fallback & error TIDAK boleh di-cache: kalau AI sedang gagal atau jatah
- * harian habis, permintaan berikutnya harus mencoba lagi, bukan menerima
- * fallback basi selama 30 hari.
+ * Error TIDAK boleh di-cache: kalau AI sedang penuh atau gagal, permintaan
+ * berikutnya harus mencoba lagi, bukan menerima kegagalan basi selama 30 hari.
  */
 const NO_STORE = "no-store";
+
+/** Batas kecepatan OpenAlex berlaku per detik, jadi jeda singkat sudah cukup. */
+const OPENALEX_RETRY_AFTER = 3;
 
 function json(body: unknown, status: number, cacheControl: string): Response {
   return Response.json(body, { status, headers: { "Cache-Control": cacheControl } });
@@ -39,9 +41,24 @@ function success(summary: Summary): Response {
   return json(summary, 200, CACHE_SUCCESS);
 }
 
+/**
+ * AI sedang tidak bisa meringkas. 503 + `retryAfter` berarti "penuh, coba lagi
+ * dalam N detik" — kartunya tetap menampilkan shimmer dan mencoba lagi sendiri.
+ * Tanpa `retryAfter` berarti gagal sungguhan (jatah harian habis, output model
+ * rusak): client berhenti mencoba dan menampilkan judul asli.
+ */
+function unavailable(retryAfter: number | null): Response {
+  const headers: Record<string, string> = { "Cache-Control": NO_STORE };
+  if (retryAfter !== null) headers["Retry-After"] = String(retryAfter);
+  return Response.json(
+    { error: retryAfter !== null ? "busy" : "unavailable", retryAfter },
+    { status: 503, headers },
+  );
+}
+
 export async function GET(request: Request): Promise<Response> {
   const limit = await checkRateLimit("summarize", request);
-  if (!limit.success) return tooManyRequests();
+  if (!limit.success) return tooManyRequests(limit.retryAfter);
 
   const rawId = new URL(request.url).searchParams.get("paper_id")?.trim() ?? "";
   if (!rawId) {
@@ -63,6 +80,9 @@ export async function GET(request: Request): Promise<Response> {
     work = await fetchWorkContent(paperId);
   } catch (error) {
     if (error instanceof OpenAlexError) {
+      // OpenAlex sedang membatasi kecepatan: suruh kartu menunggu sebentar,
+      // sama seperti saat jatah AI per menit penuh.
+      if (error.status === 429) return unavailable(OPENALEX_RETRY_AFTER);
       console.error("[api/summarize] OpenAlex:", error.message);
       return json({ error: "Gagal mengambil paper. Coba lagi sebentar lagi." }, 502, NO_STORE);
     }
@@ -74,28 +94,33 @@ export async function GET(request: Request): Promise<Response> {
     return json({ error: "Paper not found" }, 404, NO_STORE);
   }
 
-  // 3. Abstrak kosong → fallback, JANGAN panggil AI (SPEC.md Bagian 2).
-  //    Hasilnya tidak akan berubah, jadi aman di-cache seperti ringkasan sukses.
+  // 3. Abstrak kosong → ringkasan "tanpa abstrak", JANGAN panggil AI (SPEC.md
+  //    Bagian 2). Hasilnya tidak akan berubah, jadi aman di-cache.
   if (!work.abstract.trim()) {
-    return success(fallbackSummary(work.title));
+    return success(noAbstractSummary(work.title));
   }
 
-  // 4. Jatah AI harian global. Habis → fallback sementara (tidak di-cache).
-  if (!(await reserveAiCall())) {
-    console.warn(`[api/summarize] Jatah AI harian habis, ${paperId} memakai fallback.`);
-    return json(fallbackSummary(work.title), 200, NO_STORE);
+  // 4. Jatah AI global: per menit (kuota Gemini) lalu per hari.
+  const slot = await reserveAiCall();
+  if (!slot.ok) {
+    if (slot.reason === "daily") {
+      console.warn(`[api/summarize] Jatah AI harian habis, ${paperId} tidak diringkas.`);
+    }
+    return unavailable(slot.reason === "busy" ? slot.retryAfter : null);
   }
 
-  // 5. Panggil AI. Gagal → fallback sementara (tidak di-cache).
-  const summary = await summarizePaper(work.title, work.abstract);
-  if (!summary) {
-    console.error(`[api/summarize] Summarization gagal untuk ${paperId}, memakai fallback.`);
-    return json(fallbackSummary(work.title), 200, NO_STORE);
+  // 5. Panggil AI.
+  const result = await summarizePaper(paperId, work.title, work.abstract);
+  if (!result.ok) {
+    if (result.retryAfter === null) {
+      console.error(`[api/summarize] Summarization gagal untuk ${paperId}.`);
+    }
+    return unavailable(result.retryAfter);
   }
 
   // 6. Simpan ke Redis. Di-await supaya penulisan tidak terpotong saat
   //    fungsi serverless dimatikan setelah response dikirim.
-  await cacheSummary(paperId, summary);
+  await cacheSummary(paperId, result.summary);
 
-  return success(summary);
+  return success(result.summary);
 }

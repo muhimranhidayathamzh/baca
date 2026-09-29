@@ -1,6 +1,6 @@
 import { buildFeedUrl } from "./feed-url";
 import { STORAGE_KEYS } from "./storage-keys";
-import { TOPICS } from "./topics";
+import { FOR_YOU, TOPICS } from "./topics";
 
 /**
  * Preload /api/feed sedini mungkin — dipasang di root layout sebagai
@@ -20,7 +20,7 @@ import { TOPICS } from "./topics";
  *   selalu mengalihkan ke /feed — jadi setiap kali app dibuka dari homescreen
  *   ikut diuntungkan.
  *
- * Logika pemilihan topik/mode di sini HARUS sama dengan feed/page.tsx. Kalau
+ * Logika pemilihan chip/mode di sini HARUS sama dengan feed/page.tsx. Kalau
  * menyimpang, akibatnya aman — preload terbuang dan feed tetap memanggil API
  * sendiri — hanya lebih lambat. URL-nya sendiri dirakit fungsi yang sama.
  *
@@ -30,6 +30,7 @@ function preloadFeed(
   build: typeof buildFeedUrl,
   keys: typeof STORAGE_KEYS,
   allTopics: string[],
+  forYou: string,
 ): void {
   try {
     const storage = window.localStorage;
@@ -50,18 +51,23 @@ function preloadFeed(
     const saved = read<unknown>(keys.topics, []);
     const topics = Array.isArray(saved) && saved.length > 0 ? (saved as string[]) : allTopics;
     const active = read<string | null>(keys.activeTopic, null);
-    const topic = active && topics.includes(active) ? active : topics[0]!;
+    const chip = active && (active === forYou || topics.includes(active)) ? active : forYou;
     const mode = read<string>(keys.mode, "fokus");
-    const history = read<unknown>(keys.readHistory, []);
 
-    const link = document.createElement("link");
-    link.rel = "preload";
-    link.as = "fetch";
-    // Wajib untuk preload `as=fetch`: tanpa atribut ini mode kredensialnya
-    // tidak cocok dengan fetch() biasa dan respons tidak akan dipakai ulang.
-    link.crossOrigin = "anonymous";
-    link.href = build(topic, mode, Array.isArray(history) ? (history as string[]) : [], null, null);
-    document.head.appendChild(link);
+    // "Untukmu" memuat satu aliran per topik. Hanya 3 pertama yang di-preload
+    // — sama dengan gelombang pertama di useFeed (MAX_PARALLEL_STREAMS).
+    // Mem-preload semuanya justru menembakkan request serentak yang ditolak
+    // batas kecepatan OpenAlex.
+    for (const topic of (chip === forYou ? topics : [chip]).slice(0, 3)) {
+      const link = document.createElement("link");
+      link.rel = "preload";
+      link.as = "fetch";
+      // Wajib untuk preload `as=fetch`: tanpa atribut ini mode kredensialnya
+      // tidak cocok dengan fetch() biasa dan respons tidak akan dipakai ulang.
+      link.crossOrigin = "anonymous";
+      link.href = build(topic, mode, null, null);
+      document.head.appendChild(link);
+    }
   } catch {
     // localStorage diblokir — feed tetap memuat seperti biasa setelah hydrate.
   }
@@ -69,4 +75,4 @@ function preloadFeed(
 
 export const FEED_PRELOAD_SCRIPT = `(${preloadFeed.toString()})(${buildFeedUrl.toString()},${JSON.stringify(
   STORAGE_KEYS,
-)},${JSON.stringify(TOPICS)});`;
+)},${JSON.stringify(TOPICS)},${JSON.stringify(FOR_YOU)});`;

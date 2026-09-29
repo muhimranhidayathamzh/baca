@@ -1,3 +1,7 @@
+"use client";
+
+import { useState } from "react";
+import { hasInteracted } from "@/lib/first-interaction";
 import { underlineVariant } from "@/lib/topics";
 
 /**
@@ -16,11 +20,26 @@ export default function HookText({
   hook,
   keyPhrase,
   paperId,
+  draw,
 }: {
   hook: string;
   keyPhrase: string | null;
   paperId: string;
+  /**
+   * Goreskan coretannya dari kiri ke kanan saat pertama tampil, seperti
+   * pulpen. Animasinya CSS murni dan hanya berjalan sekali saat elemen dipasang.
+   * - "always": reader — selalu dibuka lewat ketukan.
+   * - "after-interaction": kartu feed — hanya kalau hook tiba setelah user
+   *   mulai berinteraksi (alasannya di lib/first-interaction.ts).
+   */
+  draw?: "always" | "after-interaction";
 }) {
+  // Diputuskan sekali saat hook dipasang: kalau ikut berubah saat user
+  // pertama menggulir, hook yang sudah tampil akan menggores ulang.
+  const [animate] = useState(
+    () => draw === "always" || (draw === "after-interaction" && hasInteracted()),
+  );
+
   if (!keyPhrase) return <>{hook}</>;
 
   const index = hook.indexOf(keyPhrase);
@@ -29,7 +48,9 @@ export default function HookText({
   return (
     <>
       {hook.slice(0, index)}
-      <span className={underlineVariant(paperId)}>{keyPhrase}</span>
+      <span className={`${underlineVariant(paperId)}${animate ? " underline-draw-quick" : ""}`}>
+        {keyPhrase}
+      </span>
       {hook.slice(index + keyPhrase.length)}
     </>
   );

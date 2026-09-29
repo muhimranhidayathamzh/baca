@@ -1,11 +1,12 @@
 "use client";
 
 import { AnimatePresence, m, useDragControls, type PanInfo } from "framer-motion";
-import { Bookmark, ChevronDown, ExternalLink, Info, Share2 } from "lucide-react";
+import { ChevronDown, ExternalLink, Info, Share2 } from "lucide-react";
 import { useEffect } from "react";
 import DeepRead from "./DeepRead";
 import QuickTake from "./QuickTake";
 import HookText from "@/components/ui/HookText";
+import SaveIcon from "@/components/ui/SaveIcon";
 import Shimmer from "@/components/ui/Shimmer";
 import { useToast } from "@/components/ui/Toast";
 import { trackOriginalPaperOpened } from "@/lib/analytics";
@@ -20,6 +21,7 @@ interface ReaderOverlayProps {
   isSaved: boolean;
   onClose: () => void;
   onToggleSave: (paper: Paper) => void;
+  onRetry: (paperId: string) => void;
 }
 
 /** Spring "fisik" — seperti menarik halaman kertas (SPEC.md Bagian 3). */
@@ -45,6 +47,7 @@ export default function ReaderOverlay({
   isSaved,
   onClose,
   onToggleSave,
+  onRetry,
 }: ReaderOverlayProps) {
   const dragControls = useDragControls();
   const toast = useToast();
@@ -152,17 +155,7 @@ export default function ReaderOverlay({
                     aria-pressed={isSaved}
                     className="p-1 text-page-ink2"
                   >
-                    <m.span
-                      className="block"
-                      animate={{ scale: isSaved ? 1.12 : 1 }}
-                      transition={SLIDE_SPRING}
-                    >
-                      <Bookmark
-                        size={19}
-                        strokeWidth={1.75}
-                        className={isSaved ? "fill-amber text-amber" : ""}
-                      />
-                    </m.span>
+                    <SaveIcon saved={isSaved} size={19} />
                   </button>
 
                   <button
@@ -213,7 +206,12 @@ export default function ReaderOverlay({
                       variants={itemVariants}
                       className="font-grotesk text-[24px] font-medium leading-[1.3] tracking-[-0.015em] text-page-ink"
                     >
-                      <HookText hook={summary!.hook} keyPhrase={summary!.key} paperId={paper.id} />
+                      <HookText
+                        hook={summary!.hook}
+                        keyPhrase={summary!.key}
+                        paperId={paper.id}
+                        draw="always"
+                      />
                     </m.h1>
                   ) : (
                     <m.div
@@ -259,13 +257,22 @@ export default function ReaderOverlay({
                 {summary ? (
                   <>
                     <QuickTake items={summary.quick} />
-                    <DeepRead text={summary.deep} readingMinutes={paper.readingMinutes} />
+                    <DeepRead text={summary.deep} />
                   </>
                 ) : state?.status === "error" ? (
-                  <p className="mb-7 font-serif-read text-[15px] leading-relaxed text-page-ink2">
-                    Ringkasan gagal dimuat. Kamu tetap bisa membuka paper aslinya
-                    di bawah.
-                  </p>
+                  <div className="mb-7">
+                    <p className="font-serif-read text-[15px] leading-relaxed text-page-ink2">
+                      Ringkasannya belum bisa dibuat sekarang. Paper aslinya tetap
+                      bisa kamu buka di bawah.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => onRetry(paper.id)}
+                      className="mt-3 rounded-full border border-page-line px-4 py-2 font-ui text-[13px] text-page-ink"
+                    >
+                      Coba lagi
+                    </button>
+                  </div>
                 ) : (
                   <div className="mb-7 flex flex-col gap-3" aria-label="Memuat ringkasan">
                     <Shimmer className="h-4 w-full !bg-page-line" />

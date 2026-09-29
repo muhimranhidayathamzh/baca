@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+const WORDMARK = "baca.";
+
 interface TopBarProps {
   title?: string;
   leading?: ReactNode;
@@ -23,7 +25,14 @@ export default function TopBar({ title, leading, trailing }: TopBarProps) {
             ditemukan (audit axe: page-has-heading-one). */}
         {title && (
           <h1 className="truncate font-grotesk text-sm font-semibold tracking-wide text-on-d">
-            {title}
+            {/* Wordmark memakai titik amber yang sama dengan layar pembuka. */}
+            {title === WORDMARK ? (
+              <>
+                baca<span className="text-amber">.</span>
+              </>
+            ) : (
+              title
+            )}
           </h1>
         )}
       </div>
