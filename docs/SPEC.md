@@ -116,8 +116,35 @@
 > Dua regresi ditemukan dan diperbaiki selama pengukuran: (1) "Untukmu" dengan
 > 6 topik menunggu dua gelombang fetch sebelum menampilkan apa pun (LCP +0,8 s)
 > → sekarang satu gelombang per batch; (2) coretan amber membuat hook dihitung
-> LCP (5,0 s) → aturan turunan 2. Angka yang mengikat tetap PageSpeed Insights
-> di URL produksi (Bagian 11).
+> LCP (5,0 s) → aturan turunan 2.
+
+> **ANGKA YANG MENGIKAT — URL produksi (baca-three.vercel.app), commit
+> `dc232f7`, 29 September 2026.** PageSpeed Insights mobile untuk `/` memberi
+> **Performance 95, Aksesibilitas 100, Best Practices 100, SEO 100**
+> (desktop: 100 di semua kategori). Lighthouse mobile terhadap URL produksi
+> yang sama, dua kali per halaman:
+>
+> | Halaman | Performance | FCP | LCP | TBT | CLS |
+> |---|---|---|---|---|---|
+> | /onboarding | 95, 95 | 0,9 s | 2,7 s | 130 ms | **0** |
+> | /search | 94, 88 | 1,1 s | 2,9 s | 120–300 ms | **0** |
+> | /feed | 90, 90 | 1,0–1,4 s | 3,2–3,4 s | 150–180 ms | **0** |
+>
+> Angka `/onboarding` cocok persis dengan PageSpeed (95), jadi metode ini sah
+> dipakai untuk halaman yang tidak diukur PageSpeed. Catat: PageSpeed menguji
+> `/`, dan karena datang tanpa localStorage ia dialihkan ke `/onboarding` —
+> `/feed` tidak pernah terukur olehnya.
+>
+> **`/feed` = 90 berarti PAS DI GARIS, belum melewatinya** (standar: > 90).
+> Bukan regresi dari perubahan FYP: CLS 0 dan TBT 150–180 ms (dulu 460 ms),
+> dan layar pertama kini tidak memanggil `/api/summarize` sama sekali. Yang
+> menahan adalah LCP ~3,3 s. Diagnostik produksi menunjukkan **tidak ada
+> resource yang memblokir render**, seluruh JS selesai di 543 ms, dan LCP
+> sesungguhnya (TTFB 155 ms + render delay 315 ms) hanya ~470 ms — sisanya
+> hasil simulasi 4G lambat Lighthouse. Kandidat perbaikan berikutnya kalau
+> ingin menembus 90: **71 KiB JavaScript tak terpakai** dan 12 KiB legacy JS
+> (keduanya disebut laporan PageSpeed), serta **8 file font terpisah** yang
+> semuanya diunduh saat muat pertama.
 
 ### Arsitektur Alur Data
 ```
