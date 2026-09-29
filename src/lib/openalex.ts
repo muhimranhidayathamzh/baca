@@ -8,12 +8,6 @@ export { TOPICS, isTopicName } from "./topics";
 
 const OPENALEX_BASE = "https://api.openalex.org";
 
-/**
- * Email untuk "polite pool" OpenAlex — memberi kuota & prioritas lebih baik
- * daripada anonim. Selalu dikirim, terlepas dari ada tidaknya API key.
- */
-const POLITE_MAILTO = "imranhdayat@gmail.com";
-
 /** Paper harus terbit tahun ini atau sesudahnya (SPEC.md: filter 2022+). */
 const MIN_PUBLICATION_YEAR = 2022;
 
@@ -108,7 +102,13 @@ export function isValidWorkId(id: string): boolean {
 
 function buildUrl(path: string, params: Record<string, string | number | undefined>): string {
   const url = new URL(`${OPENALEX_BASE}${path}`);
-  url.searchParams.set("mailto", POLITE_MAILTO);
+
+  // Email "polite pool" OpenAlex: memberi kuota & prioritas lebih baik
+  // daripada anonim. Diisi lewat env, bukan di-hardcode, supaya tidak ada
+  // identitas pribadi yang ikut ter-commit. Praktis hanya berpengaruh saat
+  // OPENALEX_API_KEY kosong — key sudah mengidentifikasi pemanggil.
+  const mailto = process.env.OPENALEX_MAILTO?.trim();
+  if (mailto) url.searchParams.set("mailto", mailto);
 
   // API key hanya dikirim kalau benar-benar terisi: OpenAlex menolak key
   // kosong/ngawur dengan HTTP 401, jadi mengirim string kosong justru

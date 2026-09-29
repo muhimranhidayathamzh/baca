@@ -753,6 +753,10 @@ lebih andal daripada hanya memintanya lewat prompt.
 - **Key yang salah ditolak keras**: OpenAlex membalas `401 API key not found`.
   Karena itu `lib/openalex.ts` hanya mengirim `api_key` kalau env var-nya
   benar-benar terisi — env kosong lebih baik daripada env ngawur.
+- Parameter `mailto` (polite pool) diisi dari **`OPENALEX_MAILTO`**, bukan
+  di-hardcode — repo ini publik, dan identitas pribadi tidak boleh ikut
+  ter-commit. Praktis hanya berpengaruh saat `OPENALEX_API_KEY` kosong, karena
+  API key sudah mengidentifikasi pemanggil.
 
 ### Field Mapping (Indonesia → OpenAlex)
 Field ID diverifikasi terhadap endpoint `/fields` yang live (26 field total):
@@ -1004,6 +1008,7 @@ AI_RPM_LIMIT=               # OPSIONAL, default 12 panggilan AI/menit untuk semu
 
 # OpenAlex
 OPENALEX_API_KEY=           # dari openalex.org/settings/api
+OPENALEX_MAILTO=            # OPSIONAL, email untuk "polite pool" (lihat Bagian 6)
 
 # OPSIONAL — token untuk membaca metrik di GET /api/stats. Kosong = endpoint mati.
 STATS_TOKEN=                # string acak panjang, mis. `openssl rand -hex 32`
